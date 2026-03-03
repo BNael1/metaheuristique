@@ -1,0 +1,133 @@
+% =============================================================================
+%  Rapport – Projet Métaheuristiques M1 : Optimisation de trajectoires
+%                   par courbes de Bézier
+%  Auteurs : BENSAADI, RAHALI
+% =============================================================================
+\documentclass[a4paper,11pt]{article}
+
+% --- Packages ----------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{hmargin=2cm,vmargin=2.5cm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\floatname{algorithm}{Algorithme}
+
+% --- Custom Formatting Packages ---
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{cleveref}
+
+% --- Link Colors Setup ---
+\definecolor{darkblue}{rgb}{0.0,0.0,0.5}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=darkblue,
+    filecolor=darkblue,
+    urlcolor=darkblue,
+    citecolor=darkblue,
+    pdftitle={Rapport Métaheuristiques - BENSAADI & RAHALI}
+}
+
+% --- Headers & Footers Setup ---
+\pagestyle{fancy}
+\setlength{\headheight}{14pt}
+\fancyhf{}
+\fancyhead[L]{\textit{Projet Métaheuristiques -- Optimisation de trajectoires}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.0pt}
+
+% --- Section Titles Format ---
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{darkblue}}{\thesection}{1em}{}[{\titlerule[0.8pt]}]
+
+\begin{document}
+
+% --- Title Page ---
+\begin{titlepage}
+    \centering
+    {\large Université de Lorraine -- Master 1 Informatique \par}
+    {\large Année universitaire 2025-2026 \par}
+
+    \vspace{3cm}
+
+    {\scshape\Large Rapport de Projet \par}
+    \vspace{1cm}
+    {\Huge\bfseries Projet Métaheuristiques \\ Optimisation de trajectoires \par}
+    \vspace{1.5cm}
+
+    {\Large\itshape Optimisation de trajectoires 2D en présence d'obstacles \\ modélisées par des courbes de Bézier \par}
+
+    \vspace{3cm}
+
+    \textbf{\Large Naël BENSAADI \& RAHALI}\par
+
+    \vfill
+
+    {\large Date de rendu : Mars 2026 \par}
+\end{titlepage}
+
+\pagestyle{plain}
+\pagenumbering{roman}
+
+\begin{abstract}
+Ce rapport présente l'étude, l'implémentation et la comparaison de trois
+métaheuristiques à population --- algorithme génétique (GA), évolution
+différentielle (DE) et stratégie évolutionnaire à adaptation de la matrice de
+covariance (CMA-ES) --- pour l'optimisation de trajectoires 2D modélisées par
+des courbes de Bézier en présence d'obstacles. Après une analyse du problème
+et de sa fonction de coût composite, nous détaillons le fonctionnement de
+chaque algorithme, les choix d'implémentation et les améliorations apportées
+(seeding avancé, restarts IPOP). Une campagne expérimentale sur quatre
+instances de difficulté croissante montre la supériorité de CMA-ES sur trois
+des quatre problèmes et met en lumière les limites intrinsèques de la
+représentation par courbes de Bézier de degré fixe.
+\end{abstract}
+\thispagestyle{empty}
+\newpage
+
+\tableofcontents
+\addtocontents{toc}{\protect\thispagestyle{empty}}
+\newpage
+
+\pagestyle{fancy}
+\pagenumbering{arabic}
+
+% --- Sections (un fichier par partie) ----------------------------------------
+\input{sections/introduction}
+\input{sections/probleme}
+\input{sections/methodes}
+\input{sections/cmaes_details}
+\input{sections/experiences}
+\input{sections/analyse}
+\input{sections/justification}
+\input{sections/conclusion}
+\input{sections/references}
+
+% =============================================================================
+% Légende commune figures
+% =============================================================================
+\vspace{0.5cm}
+\noindent
+\textbf{Légende commune des figures~\ref{fig:prob1} à~\ref{fig:prob4} :}
+trajectoire (trait épais coloré : bleu = CMA-ES, orange = DE, vert = GA) ;
+carrés rouges = points de contrôle internes ;
+losanges verts = départ et arrivée ;
+cercles rouge foncé = noyau dur des obstacles ($r$) ;
+auréoles orange = zone de pénalité douce ($r < d < r+1$).
+
+\end{document}

@@ -1,0 +1,47 @@
+% =============================================================================
+\section{Protocole expérimental et résultats}
+\label{sec:experiments}
+% =============================================================================
+
+\subsection{Infrastructure de test}
+
+Un banc d'essai dédié (\texttt{BenchmarkRunner}) a été développé en Java pour
+permettre des exécutions \emph{headless} (sans affichage graphique).  Pour
+chaque paire (algorithme, instance) :
+\begin{enumerate}[nosep]
+  \item le problème est réinitialisé (\texttt{problem.reset()}) ;
+  \item l'algorithme est instancié et exécuté dans un thread séparé pendant
+        exactement $T = 60$~s ;
+  \item le meilleur score $f(\mathbf{x}^*)$ est collecté via
+        \texttt{problem.getBest\-Evaluation()}.
+\end{enumerate}
+Ce protocole est répété $R = 10$~fois indépendamment. Les statistiques
+(moyenne, écart-type, minimum, maximum) sont calculées et sauvegardées.
+
+\subsection{Résultats quantitatifs}
+
+Le tableau~\ref{tab:results} résume les performances de CMA-ES sur les
+quatre instances avec 10~runs $\times$ 60\,s.
+
+\begin{table}[H]
+\centering
+\caption{Résultats CMA-ES (IPOP) — 10~exécutions $\times$ 60\,s.}
+\label{tab:results}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Instance & Moyenne & Écart-type & Min & Max \\
+\midrule
+\texttt{prob1} & 37,72 & 0,45  & 37,37   & 38,39   \\
+\texttt{prob2} & 31,51 & 0,08  & 31,48   & 31,74   \\
+\texttt{prob3} & 29,23 & 1,54  & 28,22   & 32,22   \\
+\texttt{prob4} & 4\,670,84 & 1\,271,61 & 2\,931,23 & 5\,800,07 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Discussion.}  \texttt{prob1} et \texttt{prob2} affichent des
+écarts-types très faibles (0,45 et 0,08), indiquant que CMA-ES converge de
+façon reproductible vers un optimum de haute qualité.  \texttt{prob3} montre
+une légère instabilité (2~runs sur 10 piégés à $\approx$32), mais 80\,\% des
+runs atteignent un score inférieur à 29.  \texttt{prob4} est détaillé en
+section~\ref{sec:prob4}.

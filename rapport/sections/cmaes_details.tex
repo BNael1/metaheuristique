@@ -1,0 +1,94 @@
+% =============================================================================
+\section{Implémentation détaillée de CMA-ES}
+\label{sec:cmaes-details}
+% =============================================================================
+
+Cette section détaille les choix d'implémentation et les améliorations
+apportées à CMA-ES, qui constituent la contribution principale de ce travail.
+
+\subsection{Décomposition propre et gestion de la complexité}
+
+L'eigendecomposition de $\mathbf{C}$ (nécessaire pour l'échantillonnage,
+eq.~\ref{eq:cma-sample}, et le calcul de $\mathbf{C}^{-1/2}$,
+eq.~\ref{eq:ps}) utilise les algorithmes \texttt{tred2} (réduction de
+Householder) et \texttt{tql2} (QR itératif) issus de la bibliothèque JAMA
+(domaine public).  L'eigendecomposition n'est recalculée que lorsque le
+compteur de générations dépasse un seuil
+$\frac{\lambda}{10 \cdot d}$,
+pour éviter un coût $O(d^3)$ à chaque génération.
+
+\subsection{Seeding avancé}
+\label{sec:seeding}
+
+L'initialisation joue un rôle déterminant lorsque le budget est limité à
+60~s.  Plutôt que de démarrer CMA-ES depuis un unique point initial (par
+exemple l'interpolation linéaire départ--arrivée), nous générons un ensemble
+diversifié de \textbf{graines candidates} puis sélectionnons la meilleure
+pour initialiser $\mathbf{m}^{(0)}$.
+
+\subsubsection{Catégories de graines}
+
+Cinq familles de graines sont générées (pour un total d'environ 260) :
+
+\begin{enumerate}[nosep]
+  \item \textbf{Sinusoïdales} ($\approx$160 graines) : pour chaque combinaison
+        de période $p \in \{1,2,3,4,5\}$, phase $\phi \in \{0, \pi/4, \ldots,
+        7\pi/4\}$ et amplitude $A \in \{0{,}35, 0{,}65, 0{,}85, 0{,}95\}$,
+        on construit un vecteur dont les composantes $y$ oscillent autour de
+        l'interpolation linéaire start--end.
+  \item \textbf{Motifs en blocs} ($\approx$16 graines) : les points de contrôle
+        alternent entre la partie haute et basse du domaine par groupes de 1, 2
+        ou 4.
+  \item \textbf{Chemins de bord} (3 graines) : tous les points au bord supérieur,
+        inférieur ou alternés.
+  \item \textbf{Aléatoires} (20 graines) : tirés uniformément dans les bornes.
+  \item \textbf{Regroupements aux frontières} ($\approx$63 graines) : les
+        abscisses sont forcées à $x_{\min}$ ou $x_{\max}$, avec différents
+        profils d'ordonnées (pour exploiter la vitesse paramétrique, cf.\
+        section~\ref{sec:prob4}).
+\end{enumerate}
+
+\subsubsection{Sélection et optimisation locale des graines}
+
+Toutes les graines sont évaluées ; les 25~meilleures sont conservées en cache.
+Les 5~meilleures subissent ensuite une \textbf{optimisation locale rapide} par
+un (1+1)-ES avec la règle du 1/5 de succès (1\,000 évaluations chacune, pas
+initial $\sigma_{\text{LS}} = 0{,}5$).  CMA-ES démarre depuis la meilleure
+graine issue de cette optimisation locale.
+
+\emph{Discussion.}  Le surcoût de l'initialisation
+($\approx 260 + 5 \times 1\,000 = 5\,260$ évaluations) est négligeable
+par rapport au budget total de 60\,s (typiquement $>$300\,000 évaluations) et
+permet d'amortir considérablement le risque de convergence vers un mauvais
+optimum local.
+
+\subsection{Restarts IPOP}
+\label{sec:ipop}
+
+Lorsque la convergence est détectée (écart de fitness dans la population
+$< 10^{-12}$, ou $\sigma$ effondré), l'algorithme effectue un \emph{restart}
+selon le schéma IPOP~\cite{auger2005} :
+\begin{itemize}[nosep]
+  \item la taille de population est doublée :
+        $\lambda \leftarrow 2\lambda$, plafonnée à 512 ;
+  \item le nouveau point de départ est choisi parmi trois stratégies, tirées
+        aléatoirement :
+  \begin{enumerate}[nosep]
+    \item[40\%] graine cachée + optimisation locale (500~évals),
+    \item[30\%] meilleur point trouvé + perturbation $\sigma_0/2$,
+    \item[30\%] meilleur parmi 8~candidats (4~aléatoires +
+                4~regroupements aux frontières).
+  \end{enumerate}
+\end{itemize}
+
+\emph{Discussion.}  L'augmentation progressive de $\lambda$ permet d'explorer
+des bassins d'attraction de plus en plus larges à chaque restart, tout en
+conservant la capacité de convergence rapide des petites populations en début
+d'exécution.
+
+\subsection{Gestion des bornes}
+
+Toute composante sortant des bornes $[lb_i, ub_i]$ est \textbf{tronquée} à la
+borne la plus proche (\emph{box constraint handling}).  Cette stratégie simple
+est suffisante car la pénalité de sortie $P_{\text{bord}}$ (eq.~\ref{eq:cost})
+guide naturellement la population vers l'intérieur du domaine.

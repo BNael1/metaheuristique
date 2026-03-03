@@ -1,0 +1,127 @@
+% =============================================================================
+\section{Problème étudié et modèle de trajectoire}
+\label{sec:problem}
+% =============================================================================
+
+\subsection{Courbes de Bézier}
+
+Une courbe de Bézier d'ordre $n$ est définie par $n+1$ points de contrôle
+$\mathbf{P}_0, \ldots, \mathbf{P}_n$ et paramétrée par $t \in [0,1]$ :
+\begin{equation}
+\label{eq:bezier}
+  \mathbf{B}(t) = \sum_{i=0}^{n} \binom{n}{i} (1-t)^{n-i}\, t^i \, \mathbf{P}_i.
+\end{equation}
+Les propriétés fondamentales sont :
+\begin{itemize}[nosep]
+  \item $\mathbf{B}(0) = \mathbf{P}_0$ et $\mathbf{B}(1) = \mathbf{P}_n$
+        (interpolation des extrémités) ;
+  \item la courbe est contenue dans l'enveloppe convexe des points de contrôle ;
+  \item elle est infiniment dérivable, ce qui la rend adaptée à la modélisation
+        de trajectoires fluides.
+\end{itemize}
+
+Dans notre problème, les points $\mathbf{P}_0$ (départ) et $\mathbf{P}_n$
+(arrivée) sont fixés par l'instance.  Seuls les $n_{\text{CP}} = n - 1$ points
+de contrôle internes constituent les \textbf{variables de décision}.
+
+\subsection{Encodage des variables de décision}
+
+L'encodage adopté est un vecteur plat $\mathbf{x} \in \mathbb{R}^d$ avec
+$d = 2 \, n_{\text{CP}}$ :
+\[
+  \mathbf{x} = \bigl(x_0, y_0, \; x_1, y_1, \; \ldots, \; x_{n_{\text{CP}}-1},
+                y_{n_{\text{CP}}-1}\bigr)
+\]
+où $(x_i, y_i)$ représente les coordonnées du $(i+1)$-ème point de contrôle
+interne.  Les bornes de chaque composante sont celles du domaine rectangulaire
+$[x_{\min}, x_{\max}] \times [y_{\min}, y_{\max}]$ défini par l'instance.
+
+\subsection{Fonction de coût}
+\label{sec:cost}
+
+La fonction de coût $f(\mathbf{x})$ est évaluée en échantillonnant
+$N = 1\,000$ points régulièrement espacés en paramètre $t \in [0,1]$ le long
+de la courbe (nous notons $\mathbf{q}_k = \mathbf{B}(k/(N-1))$ pour
+$k = 0, \ldots, N-1$), puis en sommant quatre composantes pondérées :
+
+\begin{equation}
+\label{eq:cost}
+  f(\mathbf{x}) \;=\; L(\mathbf{x})
+    \;+\; \alpha \cdot P_{\text{obs}}(\mathbf{x})
+    \;+\; \beta \cdot P_{\text{courb}}(\mathbf{x})
+    \;+\; \gamma \cdot P_{\text{bord}}(\mathbf{x})
+\end{equation}
+avec $\alpha = 100$, $\beta = 1$, $\gamma = 100$.
+
+\paragraph{Longueur $L$.}
+Somme des distances euclidiennes entre points consécutifs :
+\[
+  L(\mathbf{x}) = \sum_{k=1}^{N-1} \|\mathbf{q}_k - \mathbf{q}_{k-1}\|_2.
+\]
+
+\paragraph{Pénalité d'obstacle $P_{\text{obs}}$.}
+Pour chaque obstacle circulaire de centre $\mathbf{c}_j$ et rayon $r_j$, et
+pour chaque point de trajectoire $\mathbf{q}_k$, la distance
+$d_{jk} = \|\mathbf{q}_k - \mathbf{c}_j\|_2$ détermine la pénalité :
+\[
+  p_{\text{obs}}(d, r) =
+  \begin{cases}
+    2 + r - d, & \text{si } d \leq r \quad \text{(collision dure)}, \\
+    1 - (d - r), & \text{si } r < d < r+1 \quad \text{(zone de proximité)}, \\
+    0, & \text{sinon}.
+  \end{cases}
+\]
+La pénalité totale est $P_{\text{obs}} = \sum_j \sum_k p_{\text{obs}}(d_{jk}, r_j)$.
+
+\emph{Discussion.}  Cette formulation introduit une \textbf{zone de transition
+douce} (anneau de largeur 1 autour de chaque obstacle) qui lisse le paysage
+d'optimisation.  Sans cette zone, la frontière abrupte entre « collision » et
+« pas de collision » créerait des discontinuités très défavorables aux
+métaheuristiques à population.
+
+\paragraph{Pénalité de courbure $P_{\text{courb}}$.}
+Somme des déviations angulaires entre triplets de points consécutifs :
+\[
+  P_{\text{courb}} = \sum_{k=1}^{N-2} \bigl(1 - \cos\theta_k\bigr),
+  \qquad
+  \cos\theta_k = \frac{(\mathbf{q}_k - \mathbf{q}_{k-1}) \cdot
+                        (\mathbf{q}_{k+1} - \mathbf{q}_k)}
+                       {\|\mathbf{q}_k - \mathbf{q}_{k-1}\|\;
+                        \|\mathbf{q}_{k+1} - \mathbf{q}_k\|}.
+\]
+
+\paragraph{Pénalité de sortie $P_{\text{bord}}$.}
+Nombre de points hors du domaine :
+$P_{\text{bord}} = \#\{k : \mathbf{q}_k \notin
+[x_{\min}, x_{\max}] \times [y_{\min}, y_{\max}]\}$.
+
+\emph{Discussion.}  Les pondérations $\alpha = \gamma = 100$ rendent les
+collisions et les sorties de zone cent fois plus coûteuses par unité que la
+longueur.  La courbure ($\beta = 1$) agit comme un régularisateur léger qui
+favorise la fluidité sans dominer les autres termes.
+
+\subsection{Description des instances}
+\label{sec:instances}
+
+Les quatre instances fournies sont résumées dans le tableau~\ref{tab:instances}.
+
+\begin{table}[H]
+\centering
+\caption{Caractéristiques des quatre instances du problème.}
+\label{tab:instances}
+\begin{tabular}{@{}lccccl@{}}
+\toprule
+Instance & $n_{\text{CP}}$ & $d$ & Obstacles & Départ $\to$ Arrivée & Description \\
+\midrule
+\texttt{prob1} & 16 & 32 & 5  & $(1,1) \to (25,25)$  & Diagonale, obstacles épars \\
+\texttt{prob2} & 4  & 8  & 1  & $(11,1) \to (11,21)$  & Vertical, gros obstacle ($r=9$) \\
+\texttt{prob3} & 8  & 16 & 33 & $(1,13) \to (25,13)$ & 3 murs verticaux, brèches \\
+\texttt{prob4} & 8  & 16 & 33 & $(1,1) \to (25,1)$   & Labyrinthe en S, 3 murs \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Discussion.}  La difficulté croît de \texttt{prob1} (peu d'obstacles,
+haute dimension mais paysage lisse) à \texttt{prob4} (33~obstacles formant
+trois murs avec des brèches alternées haut/bas, nécessitant un chemin en S
+que la courbe de Bézier de degré~10 peine à reproduire).

@@ -1,0 +1,225 @@
+% =============================================================================
+\section{Méthodes d'optimisation}
+\label{sec:methods}
+% =============================================================================
+
+Cette section présente les trois familles de métaheuristiques implémentées.
+Pour chacune, nous rappelons le principe, donnons les équations clés et
+précisons les hyperparamètres retenus.
+
+% ----- GA --------------------------------------------------------------------
+\subsection{Algorithme génétique réel (GA)}
+\label{sec:ga}
+
+\subsubsection{Principe}
+
+Un algorithme génétique (AG) maintient une population d'individus (vecteurs
+$\mathbf{x} \in \mathbb{R}^d$) et les fait évoluer par des opérateurs de
+sélection, croisement et mutation inspirés de la génétique~\cite{deb2001}.
+
+\subsubsection{Sélection par tournoi binaire}
+
+Deux individus sont tirés au hasard ; le meilleur (fitness minimale) est
+sélectionné comme parent. Ce processus est répété pour chaque parent nécessaire
+au croisement.
+
+\subsubsection{Croisement SBX (\emph{Simulated Binary Crossover})}
+
+Pour deux parents $\mathbf{p}_1, \mathbf{p}_2$, un enfant $\mathbf{c}$ est
+généré composante par composante.  Avec probabilité $p_c = 0{,}9$ :
+\[
+  u \sim \mathcal{U}(0,1), \qquad
+  \beta_q =
+  \begin{cases}
+    (2u)^{1/(\eta_c+1)}, & \text{si } u \leq 0{,}5, \\
+    \bigl(\frac{1}{2(1-u)}\bigr)^{1/(\eta_c+1)}, & \text{sinon},
+  \end{cases}
+\]
+\[
+  c_i = \frac{1}{2}\bigl[(1+\beta_q)\,p_{1,i} + (1-\beta_q)\,p_{2,i}\bigr],
+\]
+avec $\eta_c = 20$ (indice de distribution).  Un $\eta_c$ élevé concentre les
+enfants autour des parents.
+
+\subsubsection{Mutation polynomiale}
+
+Chaque composante $x_i$ est mutée avec probabilité $p_m = 1/d$ :
+\[
+  r \sim \mathcal{U}(0,1), \qquad
+  \delta_q =
+  \begin{cases}
+    (2r)^{1/(\eta_m+1)} - 1, & \text{si } r < 0{,}5, \\
+    1 - \bigl(2(1-r)\bigr)^{1/(\eta_m+1)}, & \text{sinon},
+  \end{cases}
+\]
+\[
+  x_i' = x_i + \delta_q \cdot (x_{i,\max} - x_{i,\min}),
+\]
+avec $\eta_m = 20$.  La valeur est ensuite tronquée dans les bornes.
+
+\subsubsection{Élitisme}
+
+Le meilleur individu de la génération précédente est systématiquement conservé
+dans la nouvelle population, remplaçant le plus mauvais descendant si
+nécessaire.
+
+\paragraph{Paramètres retenus.}
+Population $N_P = 100$, $\eta_c = \eta_m = 20$, $p_c = 0{,}9$,
+$p_m = 1/d$.
+
+% ----- DE --------------------------------------------------------------------
+\subsection{Évolution différentielle (DE)}
+\label{sec:de}
+
+\subsubsection{Principe}
+
+L'évolution différentielle~\cite{storn1997} exploite les \emph{différences}
+entre individus de la population comme vecteur de perturbation.  La variante
+retenue est \texttt{DE/current-to-best/1/bin}.
+
+\subsubsection{Mutation}
+
+Pour chaque individu cible $\mathbf{x}_i$, un vecteur mutant est construit :
+\begin{equation}
+\label{eq:de-mutation}
+  \mathbf{v}_i = \mathbf{x}_i + F_i \cdot (\mathbf{x}_{\text{best}} -
+  \mathbf{x}_i) + F_i \cdot (\mathbf{x}_{r_1} - \mathbf{x}_{r_2}),
+\end{equation}
+où $r_1 \neq r_2 \neq i$ sont tirés aléatoirement et $\mathbf{x}_{\text{best}}$
+est le meilleur individu courant.
+
+\subsubsection{Croisement binomial}
+
+Le vecteur d'essai $\mathbf{u}_i$ est construit par :
+\[
+  u_{i,j} =
+  \begin{cases}
+    v_{i,j}, & \text{si } \text{rand}_j < CR_i \text{ ou } j = j_{\text{rand}}, \\
+    x_{i,j}, & \text{sinon},
+  \end{cases}
+\]
+où $j_{\text{rand}}$ est un indice choisi aléatoirement pour garantir qu'au
+moins une composante provient du mutant.
+
+\subsubsection{Sélection gloutonne}
+
+L'individu d'essai remplace la cible si et seulement si sa fitness est
+meilleure ou égale :
+$\mathbf{x}_i^{(g+1)} = \mathbf{u}_i$ si $f(\mathbf{u}_i) \leq
+f(\mathbf{x}_i^{(g)})$, sinon $\mathbf{x}_i^{(g+1)} = \mathbf{x}_i^{(g)}$.
+
+\subsubsection{Auto-adaptation jDE}
+
+Les paramètres $F_i$ et $CR_i$ sont adaptés individuellement à chaque
+génération~\cite{brest2006} :
+\[
+  F_i^{(g+1)} =
+  \begin{cases}
+    F_l + \text{rand} \cdot F_u, & \text{avec probabilité } \tau_1 = 0{,}1, \\
+    F_i^{(g)}, & \text{sinon},
+  \end{cases}
+  \qquad
+  CR_i^{(g+1)} =
+  \begin{cases}
+    \text{rand}, & \text{avec probabilité } \tau_2 = 0{,}1, \\
+    CR_i^{(g)}, & \text{sinon},
+  \end{cases}
+\]
+avec $F_l = 0{,}1$ et $F_u = 0{,}9$.  Ce mécanisme supprime le besoin de
+régler manuellement $F$ et $CR$.
+
+\subsubsection{Recherche locale hybride}
+
+Toutes les 5~générations, un (1+1)-ES gaussien est appliqué au meilleur
+individu pendant 100~évaluations au maximum, avec un pas initial de 0,5 et
+la règle d'adaptation dite « du 1/5 de succès ».
+
+\paragraph{Paramètres retenus.}
+$N_P = 10d$, $F_{\text{init}} = 0{,}7$, $CR_{\text{init}} = 0{,}9$,
+$\tau_1 = \tau_2 = 0{,}1$.
+
+% ----- CMA-ES ----------------------------------------------------------------
+\subsection{CMA-ES (\emph{Covariance Matrix Adaptation — Evolution Strategy})}
+\label{sec:cmaes}
+
+\subsubsection{Principe}
+
+CMA-ES~\cite{hansen2001,hansen2016} est une stratégie évolutionnaire qui
+échantillonne $\lambda$ descendants à partir d'une distribution multinormale
+$\mathcal{N}(\mathbf{m}, \sigma^2 \mathbf{C})$ et met à jour ses paramètres
+--- le centroïde $\mathbf{m}$, le pas global $\sigma$ et la matrice de
+covariance $\mathbf{C}$ --- à partir des $\mu$ meilleurs individus.
+
+\subsubsection{Échantillonnage}
+
+À la génération $g$, les $\lambda$ descendants sont générés par :
+\begin{equation}
+\label{eq:cma-sample}
+  \mathbf{x}_k^{(g+1)} = \mathbf{m}^{(g)} + \sigma^{(g)} \cdot
+  \mathbf{B}\,\text{diag}(\mathbf{d})\,\mathbf{z}_k,
+  \qquad \mathbf{z}_k \sim \mathcal{N}(\mathbf{0}, \mathbf{I}),
+\end{equation}
+où $\mathbf{C} = \mathbf{B}\,\text{diag}(\mathbf{d}^2)\,\mathbf{B}^T$ est la
+décomposition en valeurs propres de la matrice de covariance.
+
+\subsubsection{Mise à jour du centroïde}
+
+Les $\mu$ meilleurs descendants (triés par fitness croissante) sont combinés
+par moyenne pondérée :
+\begin{equation}
+  \mathbf{m}^{(g+1)} = \sum_{i=1}^{\mu} w_i \, \mathbf{x}_{i:\lambda}^{(g+1)},
+  \qquad \sum_{i=1}^{\mu} w_i = 1, \quad w_1 \geq \ldots \geq w_\mu > 0.
+\end{equation}
+
+\subsubsection{Chemins d'évolution cumulatifs}
+
+Deux chemins d'évolution sont maintenus pour contrôler le pas~$\sigma$ et la
+matrice~$\mathbf{C}$ :
+\begin{align}
+  \mathbf{p}_\sigma^{(g+1)} &= (1 - c_\sigma)\,\mathbf{p}_\sigma^{(g)}
+    + \sqrt{c_\sigma(2 - c_\sigma)\,\mu_{\text{eff}}}\;
+      \mathbf{C}^{-1/2}\,\frac{\mathbf{m}^{(g+1)} - \mathbf{m}^{(g)}}{\sigma^{(g)}},
+    \label{eq:ps} \\
+  \mathbf{p}_c^{(g+1)} &= (1 - c_c)\,\mathbf{p}_c^{(g)}
+    + h_\sigma\,\sqrt{c_c(2 - c_c)\,\mu_{\text{eff}}}\;
+      \frac{\mathbf{m}^{(g+1)} - \mathbf{m}^{(g)}}{\sigma^{(g)}},
+    \label{eq:pc}
+\end{align}
+avec $\mu_{\text{eff}} = 1/\sum w_i^2$ la variance effective des poids.
+
+\subsubsection{Adaptation du pas $\sigma$ (CSA)}
+
+Le \emph{Cumulative Step-size Adaptation} (CSA) ajuste $\sigma$ en comparant
+la norme de $\mathbf{p}_\sigma$ à sa valeur attendue sous marche aléatoire
+isotrope :
+\begin{equation}
+\label{eq:sigma-update}
+  \sigma^{(g+1)} = \sigma^{(g)} \cdot
+  \exp\!\left(\frac{c_\sigma}{d_\sigma}
+    \left(\frac{\|\mathbf{p}_\sigma^{(g+1)}\|}{\chi_d} - 1\right)\right),
+\end{equation}
+où $\chi_d \approx \sqrt{d}\,(1 - 1/(4d) + 1/(21 d^2))$ est l'espérance de
+$\|\mathcal{N}(\mathbf{0}, \mathbf{I})\|$.
+
+\emph{Discussion.}  Si les pas successifs sont alignés (bonne direction), la
+norme de $\mathbf{p}_\sigma$ croît et $\sigma$ augmente, accélérant la
+convergence.  À l'inverse, des pas incohérents font décroître $\sigma$, ce qui
+ralentit l'exploration --- un mécanisme d'auto-adaptation fondamental.
+
+\subsubsection{Adaptation de la matrice de covariance $\mathbf{C}$}
+
+La covariance est mise à jour par une combinaison de rang 1 et rang $\mu$ :
+\begin{equation}
+\label{eq:C-update}
+  \mathbf{C}^{(g+1)} = (1 - c_1 - c_\mu)\,\mathbf{C}^{(g)}
+    + c_1\,\mathbf{p}_c \mathbf{p}_c^T
+    + c_\mu \sum_{i=1}^{\mu} w_i \,
+      \frac{(\mathbf{x}_{i:\lambda} - \mathbf{m}^{(g)})
+            (\mathbf{x}_{i:\lambda} - \mathbf{m}^{(g)})^T}
+           {\sigma^{(g)2}}.
+\end{equation}
+
+\emph{Discussion.}  C'est cette adaptation de $\mathbf{C}$ qui distingue
+fondamentalement CMA-ES de GA et DE : l'algorithme apprend la \emph{structure
+de corrélation} du paysage de fitness, ce qui lui permet de concentrer la
+recherche dans les directions les plus prometteuses.

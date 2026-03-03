@@ -1,0 +1,28 @@
+% =============================================================================
+\section{Conclusion et perspectives}
+\label{sec:conclusion}
+% =============================================================================
+
+\subsection{Synthèse}
+
+Nous avons implémenté et comparé trois métaheuristiques (GA, DE, CMA-ES) pour
+l'optimisation de trajectoires par courbes de Bézier.  CMA-ES (variante
+IPOP avec seeding avancé) s'est imposé comme la meilleure méthode, atteignant
+des scores reproductibles et de haute qualité sur trois instances sur quatre.
+L'instance \texttt{prob4}, malgré des résultats significativement supérieurs
+aux autres méthodes et aux solutions aléatoires, reste un défi en raison des
+limites de la représentation par courbe de Bézier unique de degré fixe.
+
+\subsection{Perspectives}
+
+Plusieurs pistes d'amélioration pourraient être explorées :
+\begin{itemize}[nosep]
+  \item \textbf{Représentation multi-segments} : utiliser plusieurs courbes de
+        Bézier concaténées (spline) pour mieux représenter les virages serrés.
+  \item \textbf{BIPOP-CMA-ES} : alterner restarts avec grandes et petites
+        populations pour explorer simultanément différentes échelles.
+  \item \textbf{Hybridation avec une recherche tabou} : maintenir une mémoire
+        des régions déjà explorées pour forcer la diversification.
+  \item \textbf{Encodage adaptatif} : optimiser simultanément le nombre de
+        points de contrôle et leurs positions.
+\end{itemize}

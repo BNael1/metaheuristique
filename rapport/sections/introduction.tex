@@ -1,0 +1,59 @@
+% =============================================================================
+\section{Introduction}
+\label{sec:intro}
+% =============================================================================
+
+\subsection{Contexte général}
+
+La planification de trajectoires en présence d'obstacles est un problème
+fondamental en robotique mobile, en animation par ordinateur et en conception
+assistée par ordinateur~\cite{latombe1991}.  Étant donné un point de départ, un
+point d'arrivée et un ensemble d'obstacles dans un espace 2D borné, il s'agit
+de trouver un chemin qui minimise simultanément la longueur parcourue, les
+risques de collision, les sorties de la zone autorisée et la rugosité du tracé.
+
+Lorsque la trajectoire est paramétrisée par une courbe de Bézier, le problème
+se réduit à l'optimisation d'un vecteur de variables continues (les coordonnées
+des points de contrôle internes).  La fonction objectif résultante est
+non-linéaire, non-convexe, non-dérivable et multi-modale : les méthodes
+classiques à gradient ne sont pas applicables, ce qui justifie le recours aux
+\emph{métaheuristiques}.
+
+\subsection{Cadre du projet}
+
+Ce travail s'inscrit dans le cadre du cours de Métaheuristiques du Master~1
+Informatique.  Le cadre imposé est le suivant :
+\begin{itemize}[nosep]
+  \item Langage \textbf{Java}, API \texttt{Problem} fournie par l'enseignant ;
+  \item budget limité à \textbf{60~secondes} par exécution (temps réel) ;
+  \item performance évaluée par la \textbf{moyenne sur 10~exécutions
+        indépendantes} du meilleur score ;
+  \item quatre instances de difficulté croissante (\texttt{prob1} à
+        \texttt{prob4}).
+\end{itemize}
+
+\subsection{Objectifs et contributions}
+
+Les étapes de travail ont été les suivantes :
+\begin{enumerate}[nosep]
+  \item Analyser le problème d'optimisation (encodage, fonction de coût,
+        structure des instances).
+  \item Implémenter et comparer trois familles de métaheuristiques : un
+        algorithme génétique réel (GA), une évolution différentielle (DE) et
+        CMA-ES avec variante IPOP.
+  \item Développer des améliorations spécifiques à CMA-ES (seeding diversifié,
+        optimisation locale des graines, restarts adaptatifs).
+  \item Conduire une campagne expérimentale rigoureuse pour sélectionner et
+        valider la méthode finale.
+\end{enumerate}
+
+\subsection{Plan du rapport}
+
+La section~\ref{sec:problem} décrit le modèle de trajectoire et la fonction de
+coût.  La section~\ref{sec:methods} présente les trois algorithmes implémentés
+et détaille les équations clés.  La section~\ref{sec:cmaes-details} approfondit
+l'implémentation de CMA-ES et les stratégies d'amélioration.  La
+section~\ref{sec:experiments} expose le protocole expérimental et les résultats.
+La section~\ref{sec:analysis} fournit une analyse par instance avec les
+visualisations comparatives.  Enfin, la section~\ref{sec:conclusion} conclut et
+propose des perspectives.

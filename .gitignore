@@ -3,6 +3,7 @@
 bin/
 build/
 out/
+rapport/build/
 
 # Log file
 *.log
@@ -42,3 +43,4 @@ Thumbs.db
 .settings/
 .classpath
 .project
+.metals

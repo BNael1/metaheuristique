@@ -1,0 +1,26 @@
+% =============================================================================
+\section{Justification du choix final}
+\label{sec:justification}
+% =============================================================================
+
+Le choix de CMA-ES comme méthode finale repose sur trois arguments convergents :
+
+\begin{enumerate}
+  \item \textbf{Supériorité théorique pour le problème considéré.}
+    CMA-ES est reconnu comme référence
+    (\emph{state-of-the-art}) pour l'optimisation continue en boîte noire
+    jusqu'à quelques centaines de dimensions~\cite{hansen2016}.  Notre problème
+    ($d = 8$--$32$, pas de gradient, multimodal) tombe exactement dans ce régime.
+
+  \item \textbf{Adaptation aux corrélations entre variables.}
+    Les coordonnées $(x_i, y_i)$ des points de contrôle successifs sont
+    naturellement corrélées : un bon chemin implique un alignement progressif
+    des points, ce que $\mathbf{C}$ capture automatiquement.  GA (SBX) et DE
+    (croisement binomial) travaillent composante par composante et ne
+    bénéficient pas de cette adaptation.
+
+  \item \textbf{Résultats expérimentaux.}
+    CMA-ES domine ou égale DE et GA sur les 4 instances, avec des écarts
+    particulièrement marqués sur \texttt{prob1} ($d = 32$) et \texttt{prob3}
+    (slalom corrélé).
+\end{enumerate}
