@@ -20,28 +20,225 @@ Ce protocole est répété $R = 10$~fois indépendamment. Les statistiques
 
 \subsection{Résultats quantitatifs}
 
-Le tableau~\ref{tab:results} résume les performances de CMA-ES sur les
-quatre instances avec 10~runs $\times$ 60\,s.
+Le tableau~\ref{tab:results} résume les performances des trois algorithmes sur les
+quatre instances avec 3~runs $\times$ 60\,s.
 
 \begin{table}[H]
 \centering
-\caption{Résultats CMA-ES (IPOP) — 10~exécutions $\times$ 60\,s.}
+\caption{Comparaison CMA-ES / DE / GA — 3~exécutions $\times$ 60\,s.}
 \label{tab:results}
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}llrrrr@{}}
 \toprule
-Instance & Moyenne & Écart-type & Min & Max \\
+Instance & Algorithme & Moyenne & Écart-type & Min & Max \\
 \midrule
-\texttt{prob1} & 37,72 & 0,45  & 37,37   & 38,39   \\
-\texttt{prob2} & 31,51 & 0,08  & 31,48   & 31,74   \\
-\texttt{prob3} & 29,23 & 1,54  & 28,22   & 32,22   \\
-\texttt{prob4} & 4\,670,84 & 1\,271,61 & 2\,931,23 & 5\,800,07 \\
+\multirow{3}{*}{\texttt{prob1}}
+  & CMA-ES & \textbf{36,35} & 0,01  & 36,34   & 36,36   \\
+  & DE     & 36,62          & 0,06  & 36,56   & 36,69   \\
+  & GA     & 37,38          & 0,58  & 36,56   & 37,89   \\
+\midrule
+\multirow{3}{*}{\texttt{prob2}}
+  & CMA-ES & \textbf{31,48} & 0,00  & 31,48   & 31,48   \\
+  & DE     & 31,48          & 0,00  & 31,48   & 31,48   \\
+  & GA     & 31,49          & 0,00  & 31,49   & 31,50   \\
+\midrule
+\multirow{3}{*}{\texttt{prob3}}
+  & CMA-ES & \textbf{28,45} & 0,13  & 28,27   & 28,58   \\
+  & DE     & 30,62          & 0,06  & 30,54   & 30,68   \\
+  & GA     & 42,11          & 1,21  & 40,50   & 43,40   \\
+\midrule
+\multirow{3}{*}{\texttt{prob4}}
+  & CMA-ES & 6\,026,86      & 170,87 & 5\,808,96 & 6\,226,28 \\
+  & DE     & 6\,242,19      & 180,05 & 6\,064,85 & 6\,489,11 \\
+  & GA     & \textbf{5\,940,93} & 310,70 & 5\,505,95 & 6\,212,18 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\emph{Discussion.}  \texttt{prob1} et \texttt{prob2} affichent des
-écarts-types très faibles (0,45 et 0,08), indiquant que CMA-ES converge de
-façon reproductible vers un optimum de haute qualité.  \texttt{prob3} montre
-une légère instabilité (2~runs sur 10 piégés à $\approx$32), mais 80\,\% des
-runs atteignent un score inférieur à 29.  \texttt{prob4} est détaillé en
+\emph{Discussion.}
+Sur \texttt{prob1}, CMA-ES domine nettement avec une moyenne de 36,35 et un
+écart-type quasi nul (0,01), suivi de DE (36,62) puis GA (37,38).
+\texttt{prob2} est résolu de façon quasi optimale par les trois algorithmes
+(scores $\approx 31{,}48$), ce qui suggère un paysage unimodal simple.
+Sur \texttt{prob3}, l'écart se creuse : CMA-ES (28,45) devance DE (30,62)
+de 7\,\%, tandis que GA (42,11) est nettement en retrait, indiquant une
+difficulté à gérer les obstacles avec un croisement SBX.
+\texttt{prob4} est le seul cas où GA obtient la meilleure moyenne
+(5\,940,93), mais avec un écart-type élevé (310,70).  Les trois algorithmes
+restent dans des scores très élevés ($>5\,500$), ce qui est détaillé en
 section~\ref{sec:prob4}.
+
+\subsection{Visualisations des trajectoires optimales (60s)}
+
+Les figures suivantes illustrent les meilleures trajectoires trouvées par
+chaque algorithme après 60 secondes d'optimisation sur chaque instance.
+Chaque image montre la courbe de Bézier calculée à partir des points de
+contrôle optimisés, la région traversée, et les obstacles (en rouge).
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob1_cmaes.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob1_de.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob1_ga.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob1} — Trajectoires optimales (60s).}
+\label{fig:traj_60s_prob1}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob2_cmaes.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob2_de.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob2_ga.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob2} — Trajectoires optimales (60s).}
+\label{fig:traj_60s_prob2}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob3_cmaes.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob3_de.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob3_ga.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob3} — Trajectoires optimales (60s).}
+\label{fig:traj_60s_prob3}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob4_cmaes.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob4_de.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/60s/path_prob4_ga.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob4} — Trajectoires optimales (60s).}
+\label{fig:traj_60s_prob4}
+\end{figure}
+
+\subsection{Solutions de référence (BKS — Best Known Solutions)}
+
+Pour établir une base de comparaison, nous avons exécuté les optimisations
+avec des budgets étendus (900~s $\times$ 5 restarts pour \texttt{prob1--3},
+2700~s $\times$ 10 restarts pour \texttt{prob4}). Les meilleures solutions
+trouvées lors de ces exécutions longues servent de \emph{best known solutions}
+(BKS) et permettent d'évaluer le « gap » entre les performances en 60s et
+celles obtenues avec plus de temps.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/cmaes_prob1.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/de_prob1.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/ga_prob1.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob1} — Solutions BKS.}
+\label{fig:bks_prob1}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/cmaes_prob2.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/de_prob2.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/ga_prob2.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob2} — Solutions BKS.}
+\label{fig:bks_prob2}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/cmaes_prob3.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/de_prob3.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/ga_prob3.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob3} — Solutions BKS.}
+\label{fig:bks_prob3}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/cmaes_prob4.png}
+  \caption*{\small CMA-ES}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/de_prob4.png}
+  \caption*{\small DE}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.31\textwidth}
+  \includegraphics[width=\textwidth]{figures/bks/ga_prob4.png}
+  \caption*{\small GA}
+\end{subfigure}
+\caption{\texttt{prob4} — Solutions BKS.}
+\label{fig:bks_prob4}
+\end{figure}

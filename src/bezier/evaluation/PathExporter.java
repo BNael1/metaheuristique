@@ -5,14 +5,20 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Rectangle2D;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.jfree.chart.ChartUtils;
 import org.jfree.chart.JFreeChart;
@@ -39,6 +45,27 @@ import bezier.projects.competitor.ga.GAOptimizer;
  */
 public class PathExporter
 {
+    private static final Pattern BKS_LINE_FR = Pattern.compile (
+            "^([^,]+),([^,]+),([+-]?[0-9]+),([0-9]+),\\\"(.*)\\\",([0-9]+)$");
+    private static final Pattern BKS_LINE_EN = Pattern.compile (
+            "^([^,]+),([^,]+),([+-]?[0-9]+(?:\\.[0-9]+)?),\\\"(.*)\\\",([0-9]+)$");
+
+    private static class BksEntry
+    {
+        final String algo;
+        final String problem;
+        final double score;
+        final double [] bestX;
+
+        BksEntry (String algo, String problem, double score, double [] bestX)
+        {
+            this.algo = algo;
+            this.problem = problem;
+            this.score = score;
+            this.bestX = bestX;
+        }
+    }
+
     /** Taille de l'image PNG (carrée) en pixels. */
     private static final int IMG_SIZE = 800;
 
@@ -75,11 +102,14 @@ public class PathExporter
     public static void main (String [] args) throws Exception
     {
         ArrayList<String> algos = new ArrayList<> (Arrays.asList ("CMAES", "DE", "GA"));
+        String bksCsvPath = null;
 
         for (int i = 0; i < args.length; i++)
         {
             if (args [i].equals ("--seconds") && i + 1 < args.length)
                 NB_SECONDS = Integer.parseInt (args [++i]);
+            else if (args [i].equals ("--bks-csv") && i + 1 < args.length)
+                bksCsvPath = args [++i];
             else if (args [i].equals ("--algos") && i + 1 < args.length)
             {
                 algos.clear ();
@@ -88,9 +118,16 @@ public class PathExporter
             }
         }
 
-        // Créer le dossier de sortie
+        if (bksCsvPath != null)
+        {
+            exportFromBksCsv (algos, bksCsvPath);
+            System.exit (0);
+        }
+
+        // Créer les dossiers de sortie
         File outDir = new File ("rapport/figures");
         outDir.mkdirs ();
+        new File ("rapport/figures/60s").mkdirs ();
 
         ArrayList<Problem> problems = Problem.getProblems ();
 
@@ -177,15 +214,159 @@ public class PathExporter
 
                 JFreeChart chart = buildChart (problem, trajectory, bestX, score,
                                               algoDisplayName (algo), algoColor (algo));
-                String filename = "rapport/figures/path_" + problem.getName ()
+                String filename = "rapport/figures/60s/path_" + problem.getName ()
                                   + "_" + algo.toLowerCase () + ".png";
                 ChartUtils.saveChartAsPNG (new File (filename), chart, IMG_SIZE, IMG_SIZE);
                 System.out.println ("  -> " + filename);
             }
         }
 
-        System.out.println ("\nTerminé ! Images dans rapport/figures/");
+        System.out.println ("\nTerminé ! Images 60s dans rapport/figures/60s/");
         System.exit (0);
+    }
+
+    // =====================================================================
+    //  Export direct depuis results/bks_all.csv
+    // =====================================================================
+    private static void exportFromBksCsv (ArrayList<String> algos, String bksCsvPath) throws Exception
+    {
+        File outDir = new File ("rapport/figures/bks");
+        outDir.mkdirs ();
+
+        ArrayList<Problem> problems = Problem.getProblems ();
+        Map<String, Problem> byName = new LinkedHashMap<> ();
+        for (Problem p : problems)
+            byName.put (p.getName (), p);
+
+        ArrayList<BksEntry> entries = readBksEntries (bksCsvPath);
+        if (entries.isEmpty ())
+        {
+            System.out.println ("Aucune entrée BKS trouvée dans " + bksCsvPath);
+            return;
+        }
+
+        for (BksEntry entry : entries)
+        {
+            if (!algos.contains (entry.algo))
+                continue;
+
+            Problem problem = byName.get (entry.problem);
+            if (problem == null)
+            {
+                System.out.println ("[WARN] Problème inconnu: " + entry.problem + " (skip)");
+                continue;
+            }
+
+            int expectedD = 2 * problem.getNControlPoints ();
+            if (entry.bestX == null || entry.bestX.length != expectedD)
+            {
+                System.out.println ("[WARN] BestX invalide pour " + entry.algo + "/" + entry.problem
+                        + " (d=" + (entry.bestX == null ? 0 : entry.bestX.length)
+                        + ", attendu=" + expectedD + ")");
+                continue;
+            }
+
+            problem.reset ();
+            MonitorChart.getNewInstance (entry.problem + "_" + entry.algo + "_bks");
+            BezierChart.getNewInstance (problem);
+
+            Bezier bezier = new Bezier (entry.bestX, problem.getStartPoint (),
+                                        problem.getEndPoint ());
+            Coordinates [] trajectory = bezier.getTrajectory ();
+
+            JFreeChart chart = buildChart (problem, trajectory, entry.bestX, entry.score,
+                    algoDisplayName (entry.algo) + " BKS", algoColor (entry.algo));
+
+            String filename = "rapport/figures/bks/"
+                    + entry.algo.toLowerCase () + "_" + entry.problem + ".png";
+            ChartUtils.saveChartAsPNG (new File (filename), chart, IMG_SIZE, IMG_SIZE);
+            System.out.println ("-> " + filename + "  (score=" + String.format ("%.4f", entry.score) + ")");
+        }
+
+        System.out.println ("\nTerminé ! Images BKS dans rapport/figures/bks/");
+    }
+
+    private static ArrayList<BksEntry> readBksEntries (String csvPath) throws Exception
+    {
+        ArrayList<BksEntry> entries = new ArrayList<> ();
+
+        try (BufferedReader br = new BufferedReader (new FileReader (csvPath)))
+        {
+            String line = br.readLine (); // header
+            if (line == null)
+                return entries;
+
+            while ((line = br.readLine ()) != null)
+            {
+                line = line.trim ();
+                if (line.isEmpty ())
+                    continue;
+
+                Matcher mFr = BKS_LINE_FR.matcher (line);
+                if (mFr.matches ())
+                {
+                    String algo = mFr.group (1).trim ().toUpperCase ();
+                    String problem = mFr.group (2).trim ();
+                    double score = Double.parseDouble (mFr.group (3) + "." + mFr.group (4));
+                    double [] bestX = parseBestX (mFr.group (5));
+                    entries.add (new BksEntry (algo, problem, score, bestX));
+                    continue;
+                }
+
+                Matcher mEn = BKS_LINE_EN.matcher (line);
+                if (mEn.matches ())
+                {
+                    String algo = mEn.group (1).trim ().toUpperCase ();
+                    String problem = mEn.group (2).trim ();
+                    double score = Double.parseDouble (mEn.group (3));
+                    double [] bestX = parseBestX (mEn.group (4));
+                    entries.add (new BksEntry (algo, problem, score, bestX));
+                    continue;
+                }
+
+                System.out.println ("[WARN] Ligne BKS ignorée (format inattendu): " + line);
+            }
+        }
+
+        return entries;
+    }
+
+    private static double [] parseBestX (String raw)
+    {
+        String s = raw.trim ();
+        if (s.startsWith ("[")) s = s.substring (1);
+        if (s.endsWith ("]")) s = s.substring (0, s.length () - 1);
+        s = s.replaceAll ("\\s+", "");
+
+        if (s.isEmpty ())
+            return new double [0];
+
+        // Format normal: 1.23,4.56,7.89
+        if (s.contains ("."))
+        {
+            String [] tokens = s.split (",");
+            double [] out = new double [tokens.length];
+            for (int i = 0; i < tokens.length; i++)
+                out [i] = Double.parseDouble (tokens [i]);
+            return out;
+        }
+
+        // Format FR issu de String.format locale FR: 1,230000,4,560000...
+        // => on reconstruit par paires (entier, décimales)
+        String [] tokens = s.split (",");
+        if (tokens.length % 2 == 0)
+        {
+            double [] out = new double [tokens.length / 2];
+            for (int i = 0, j = 0; i < tokens.length; i += 2, j++)
+                out [j] = Double.parseDouble (tokens [i] + "." + tokens [i + 1]);
+            return out;
+        }
+
+        // Fallback: parse direct après remplacement , -> .
+        double [] out = new double [tokens.length];
+        for (int i = 0; i < tokens.length; i++)
+            out [i] = Double.parseDouble (tokens [i].replace (',', '.'));
+        return out;
     }
 
     // =====================================================================
