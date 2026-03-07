@@ -1,0 +1,887 @@
+package bezier.projects.competitor.optipath;
+
+import bezier.evaluation.Problem;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Random;
+
+/**
+ * Active IPOP-CMA-ES with Mirror Sampling and Covariance Memory.
+ *
+ * Three improvements over CMAESOptimizer:
+ *
+ * 1. ACTIVE CMA-ES (Jastrebski & Arnold 2006):
+ *    Uses negative weights for the worst mu individuals in the covariance
+ *    matrix update. This "shrinks" C in bad directions, accelerating
+ *    convergence by 20-40% in moderate dimensions.
+ *
+ * 2. MIRROR SAMPLING (Brockhoff et al. 2010):
+ *    For each random vector z_k, also evaluates -z_k. This halves the
+ *    variance of the natural gradient estimator at no extra sampling cost.
+ *    lambda offspring are generated as lambda/2 mirrored pairs.
+ *
+ * 3. COVARIANCE MEMORY:
+ *    At restart, instead of resetting C = I, initializes
+ *    C = alpha * C_prev + (1 - alpha) * I, preserving learned correlations.
+ *
+ * Everything else (seeding, IPOP restarts, eigendecomposition) is inherited
+ * from the same logic as CMAESOptimizer.
+ */
+public class CMAESActive implements Optimizer
+{
+    // ===== External references =====
+    private final Problem problem;
+    private final int d;
+    private final BoundsChecker bounds;
+    private final double [] initMean;
+    private final Random rng;
+
+    // ===== CMA-ES parameters (recalculated at each restart) =====
+    private int lambda;
+    private int mu;
+    private double [] weightsPositive;   // w_1..w_mu (positive, for recombination)
+    private double [] weightsNegative;   // w_{mu+1}..w_lambda (negative, active update)
+    private double mueff;
+    private double mueffNeg;             // effective variance of negative weights
+
+    private double csig, dsig;
+    private double cc;
+    private double c1, cmu;
+    private double chiN;
+
+    // ===== Evolutionary state =====
+    private double [] mean;
+    private double sigma;
+    private double [][] C;
+    private double [][] B;
+    private double [] diagD;
+    private double [][] invsqrtC;
+    private double [] ps;
+    private double [] pc;
+
+    private int generation;
+    private int eigenCounter;
+
+    // ===== Global best =====
+    private double bestFitness;
+    private double [] bestX;
+
+    // ===== Seeding =====
+    private double startX, startY, endX, endY;
+    private ArrayList<double []> cachedSeeds;
+
+    // ===== IPOP restart =====
+    private final int lambda0;
+    private final double sigma0;
+    private int restartCount;
+    private int stagnationCounter;
+    private int maxStagnation;
+    private double prevBestGen;
+
+    // ===== Covariance Memory =====
+    private double [][] savedC;
+    private static final double COV_MEMORY_ALPHA = 0.3;
+
+    // ===== Constructor =====
+    public CMAESActive (Problem problem, int d, double [] lb, double [] ub, double [] initMean)
+    {
+        this.problem = problem;
+        this.d = d;
+        this.bounds = new BoundsChecker (lb, ub);
+        this.initMean = initMean.clone ();
+        this.rng = new Random ();
+
+        this.lambda0 = 4 + (int) (3.0 * Math.log (d));
+        this.sigma0 = (ub [0] - lb [0]) / 6.0;
+
+        this.chiN = Math.sqrt (d) * (1.0 - 1.0 / (4.0 * d) + 1.0 / (21.0 * d * d));
+    }
+
+    // ================================================================
+    //  INITIALIZATION
+    // ================================================================
+    @Override
+    public void init ()
+    {
+        startX = problem.getStartPoint ().getX ();
+        startY = problem.getStartPoint ().getY ();
+        endX   = problem.getEndPoint ().getX ();
+        endY   = problem.getEndPoint ().getY ();
+
+        bestFitness = Double.POSITIVE_INFINITY;
+        bestX = null;
+        restartCount = 0;
+        savedC = null;
+
+        // --- Diverse seeding phase ---
+        ArrayList<double []> seeds = generateDiverseSeeds ();
+        seeds.add (0, initMean.clone ());
+
+        double [] bestSeed = null;
+        double bestSeedF = Double.POSITIVE_INFINITY;
+        ArrayList<double []> evaluated = new ArrayList<> ();
+        ArrayList<Double> fitnesses = new ArrayList<> ();
+
+        for (double [] seed : seeds)
+        {
+            bounds.clampInPlace (seed);
+            double f = problem.evaluate (seed);
+            updateBest (seed, f);
+            evaluated.add (seed);
+            fitnesses.add (f);
+            if (f < bestSeedF)
+            {
+                bestSeedF = f;
+                bestSeed = seed.clone ();
+            }
+        }
+
+        // Cache top-25 seeds for restarts
+        Integer [] indices = new Integer [evaluated.size ()];
+        for (int i = 0; i < indices.length; i++) indices [i] = i;
+        Arrays.sort (indices, (a, b) -> Double.compare (fitnesses.get (a), fitnesses.get (b)));
+
+        cachedSeeds = new ArrayList<> ();
+        for (int i = 0; i < Math.min (25, indices.length); i++)
+            cachedSeeds.add (evaluated.get (indices [i]).clone ());
+
+        // --- Quick local optimization on top-5 seeds ---
+        int nLocalSeeds = Math.min (5, cachedSeeds.size ());
+        double [] localBestX = bestSeed.clone ();
+        double localBestF = bestSeedF;
+        for (int s = 0; s < nLocalSeeds; s++)
+        {
+            double [] result = quickLocalOptimize (cachedSeeds.get (s).clone (), 1000);
+            double fResult = problem.evaluate (result);
+            updateBest (result, fResult);
+            if (fResult < localBestF)
+            {
+                localBestF = fResult;
+                localBestX = result.clone ();
+            }
+        }
+
+        setupCMAES (lambda0, localBestX, sigma0, null);
+    }
+
+    // ================================================================
+    //  DIVERSE SEED GENERATION (identical to CMAESOptimizer)
+    // ================================================================
+    private ArrayList<double []> generateDiverseSeeds ()
+    {
+        int nCP = d / 2;
+        ArrayList<double []> seeds = new ArrayList<> ();
+
+        double lbY     = bounds.getLb () [1];
+        double ubY     = bounds.getUb () [1];
+        double centerY = (lbY + ubY) / 2.0;
+        double halfY   = (ubY - lbY) / 2.0;
+
+        // 1. Sinusoidal paths
+        double [] periods    = {0.5, 1.0, 1.5, 2.0, 2.5};
+        double [] phases     = {0, Math.PI / 4, Math.PI / 2, 3 * Math.PI / 4,
+                                Math.PI, 5 * Math.PI / 4, 3 * Math.PI / 2, 7 * Math.PI / 4};
+        double [] amplitudes = {0.35, 0.65, 0.85, 0.95};
+
+        for (double period : periods)
+            for (double phase : phases)
+                for (double amp : amplitudes)
+                {
+                    double [] path = new double [d];
+                    for (int i = 0; i < nCP; i++)
+                    {
+                        double t = (double) (i + 1) / (nCP + 1);
+                        path [2 * i]     = startX + t * (endX - startX);
+                        path [2 * i + 1] = centerY + amp * halfY
+                                * Math.sin (2 * Math.PI * period * t + phase);
+                    }
+                    seeds.add (path);
+                }
+
+        // 2. Block patterns
+        for (int nUp = 1; nUp <= nCP / 2; nUp++)
+        {
+            double [] pathA = new double [d];
+            double [] pathB = new double [d];
+            for (int i = 0; i < nCP; i++)
+            {
+                double t = (double) (i + 1) / (nCP + 1);
+                boolean up = ((i / nUp) % 2 == 0);
+                pathA [2 * i]     = startX + t * (endX - startX);
+                pathA [2 * i + 1] = up ? (ubY - 1) : (lbY + 1);
+                pathB [2 * i]     = startX + t * (endX - startX);
+                pathB [2 * i + 1] = up ? (lbY + 1) : (ubY - 1);
+            }
+            seeds.add (pathA);
+            seeds.add (pathB);
+        }
+
+        // 3. Edge paths
+        for (double yy : new double [] {lbY + 1.5, ubY - 1.5, centerY})
+        {
+            double [] path = new double [d];
+            for (int i = 0; i < nCP; i++)
+            {
+                double t = (double) (i + 1) / (nCP + 1);
+                path [2 * i]     = startX + t * (endX - startX);
+                path [2 * i + 1] = yy;
+            }
+            seeds.add (path);
+        }
+
+        // 4. Random solutions
+        for (int r = 0; r < 20; r++)
+            seeds.add (problem.getRandomControlPoints1DArray ());
+
+        // 5. Boundary-clustering seeds
+        double lbX  = bounds.getLb () [0];
+        double ubX  = bounds.getUb () [0];
+        double [] yLevels = {lbY, lbY + 2, lbY + 5, centerY, ubY - 5, ubY - 2, ubY};
+
+        for (double yVal : yLevels)
+        {
+            double [] path = new double [d];
+            for (int i = 0; i < nCP; i++)
+            {
+                path [2 * i]     = (i % 2 == 0) ? ubX : lbX;
+                path [2 * i + 1] = yVal;
+            }
+            seeds.add (path);
+        }
+
+        for (double y1 : new double [] {lbY, lbY + 1, lbY + 3})
+        {
+            for (double y2 : new double [] {lbY, lbY + 2, lbY + 5, centerY})
+            {
+                double [] path = new double [d];
+                for (int i = 0; i < nCP; i++)
+                {
+                    path [2 * i]     = (i % 2 == 0) ? ubX : lbX;
+                    path [2 * i + 1] = (i < nCP / 2) ? y1 : y2;
+                }
+                seeds.add (path);
+            }
+        }
+
+        for (double xVal : new double [] {lbX, ubX})
+        {
+            for (double yVal : yLevels)
+            {
+                double [] path = new double [d];
+                for (int i = 0; i < nCP; i++)
+                {
+                    path [2 * i]     = xVal;
+                    path [2 * i + 1] = yVal;
+                }
+                seeds.add (path);
+            }
+        }
+
+        for (int r = 0; r < 30; r++)
+        {
+            double [] path = new double [d];
+            for (int i = 0; i < nCP; i++)
+            {
+                path [2 * i]     = rng.nextBoolean () ? lbX : ubX;
+                path [2 * i + 1] = lbY + rng.nextDouble () * (ubY - lbY);
+            }
+            seeds.add (path);
+        }
+
+        return seeds;
+    }
+
+    // ================================================================
+    //  QUICK LOCAL OPTIMIZATION — (1+1)-ES with 1/5 success rule
+    // ================================================================
+    private double [] quickLocalOptimize (double [] x0, int maxEvals)
+    {
+        double [] x = x0.clone ();
+        bounds.clampInPlace (x);
+        double fx = problem.evaluate (x);
+        updateBest (x, fx);
+
+        double step = sigma0 / 2.0;
+        int successes = 0;
+        int window = 0;
+
+        for (int e = 0; e < maxEvals; e++)
+        {
+            double [] xNew = new double [d];
+            for (int i = 0; i < d; i++)
+                xNew [i] = x [i] + rng.nextGaussian () * step;
+            bounds.clampInPlace (xNew);
+
+            double fNew = problem.evaluate (xNew);
+            updateBest (xNew, fNew);
+
+            if (fNew < fx)
+            {
+                x = xNew;
+                fx = fNew;
+                successes++;
+            }
+            window++;
+
+            if (window >= 20)
+            {
+                double rate = (double) successes / window;
+                if (rate > 0.2) step *= 1.3;
+                else            step *= 0.7;
+                step = Math.max (step, 1e-10);
+                step = Math.min (step, sigma0 * 2);
+                successes = 0;
+                window = 0;
+            }
+        }
+        return x;
+    }
+
+    // ================================================================
+    //  SETUP CMA-ES with Active Weights
+    // ================================================================
+    private void setupCMAES (int newLambda, double [] startMean, double startSigma,
+                             double [][] prevC)
+    {
+        // Ensure lambda is even for mirror sampling
+        this.lambda = (newLambda % 2 == 0) ? newLambda : newLambda + 1;
+        this.mu = lambda / 2;
+        this.sigma = startSigma;
+        this.mean = startMean.clone ();
+
+        // --- Positive weights (for recombination, indices 0..mu-1) ---
+        weightsPositive = new double [mu];
+        double sumWp = 0;
+        for (int i = 0; i < mu; i++)
+        {
+            weightsPositive [i] = Math.log (mu + 0.5) - Math.log (i + 1.0);
+            sumWp += weightsPositive [i];
+        }
+        for (int i = 0; i < mu; i++) weightsPositive [i] /= sumWp;
+
+        double sumWp2 = 0;
+        for (int i = 0; i < mu; i++) sumWp2 += weightsPositive [i] * weightsPositive [i];
+        mueff = 1.0 / sumWp2;
+
+        // --- Negative weights (for active update, indices mu..lambda-1) ---
+        // Computed as |log-weights| for the worst mu, then normalized and negated
+        // Scaled so that sum(|w_neg|) * cmu <= 1 - c1 (safety bound from Hansen 2016)
+        weightsNegative = new double [lambda - mu];
+        double sumWnAbs = 0;
+        for (int i = 0; i < lambda - mu; i++)
+        {
+            weightsNegative [i] = Math.log (mu + 0.5) - Math.log (lambda - i);
+            sumWnAbs += weightsNegative [i];
+        }
+        // Normalize to sum to 1, then negate
+        for (int i = 0; i < lambda - mu; i++)
+            weightsNegative [i] /= sumWnAbs;
+
+        double sumWn2 = 0;
+        for (int i = 0; i < lambda - mu; i++) sumWn2 += weightsNegative [i] * weightsNegative [i];
+        mueffNeg = 1.0 / sumWn2;
+
+        // Negate and scale: total negative contribution must not exceed a safe bound
+        double alphaPos = 1.0;
+        double alphaNeg = Math.min (alphaPos,
+                Math.min (1.0 + mueff / mueffNeg,
+                          (1.0 + 2.0 * mueffNeg / (mueff + 2.0))));
+        for (int i = 0; i < lambda - mu; i++)
+            weightsNegative [i] = -alphaNeg * weightsNegative [i];
+
+        // --- Learning rates (Hansen formulas) ---
+        csig = (mueff + 2.0) / (d + mueff + 5.0);
+        dsig = 1.0 + 2.0 * Math.max (0, Math.sqrt ((mueff - 1.0) / (d + 1.0)) - 1.0) + csig;
+        cc   = (4.0 + mueff / d) / (d + 4.0 + 2.0 * mueff / d);
+        c1   = 2.0 / ((d + 1.3) * (d + 1.3) + mueff);
+        cmu  = Math.min (1.0 - c1, 2.0 * (mueff - 2.0 + 1.0 / mueff)
+                / ((d + 2.0) * (d + 2.0) + mueff));
+
+        // --- Internal state ---
+        ps = new double [d];
+        pc = new double [d];
+        C = new double [d][d];
+        B = new double [d][d];
+        diagD = new double [d];
+        invsqrtC = new double [d][d];
+
+        // Covariance Memory: mix previous C with identity
+        if (prevC != null)
+        {
+            for (int i = 0; i < d; i++)
+                for (int j = 0; j < d; j++)
+                    C [i][j] = COV_MEMORY_ALPHA * prevC [i][j]
+                             + (i == j ? (1.0 - COV_MEMORY_ALPHA) : 0.0);
+        }
+        else
+        {
+            for (int i = 0; i < d; i++)
+                C [i][i] = 1.0;
+        }
+
+        for (int i = 0; i < d; i++)
+        {
+            B [i][i] = 1.0;
+            diagD [i] = 1.0;
+            invsqrtC [i][i] = 1.0;
+        }
+
+        // If we have memory, do an initial eigendecomposition to get correct B, diagD
+        if (prevC != null)
+            eigenDecomposition ();
+
+        generation = 0;
+        eigenCounter = 0;
+        stagnationCounter = 0;
+        maxStagnation = 10 + (int) (30.0 * d / lambda);
+        prevBestGen = Double.POSITIVE_INFINITY;
+    }
+
+    // ================================================================
+    //  ONE GENERATION with Active Update + Mirror Sampling
+    // ================================================================
+    @Override
+    public void step ()
+    {
+        int halfLambda = lambda / 2;
+
+        // 1. Mirror Sampling: generate halfLambda z-vectors, evaluate z and -z
+        double [][] arx = new double [lambda][d];
+        double [][] ary = new double [lambda][d];
+        double [] fitness = new double [lambda];
+
+        for (int k = 0; k < halfLambda; k++)
+        {
+            // z ~ N(0, I)
+            double [] z = new double [d];
+            for (int i = 0; i < d; i++) z [i] = rng.nextGaussian ();
+
+            // y = B * D * z
+            double [] Dz = new double [d];
+            for (int i = 0; i < d; i++) Dz [i] = diagD [i] * z [i];
+
+            double [] y = new double [d];
+            for (int i = 0; i < d; i++)
+            {
+                double sum = 0;
+                for (int j = 0; j < d; j++) sum += B [i][j] * Dz [j];
+                y [i] = sum;
+            }
+
+            // Original: mean + sigma * y
+            for (int i = 0; i < d; i++)
+            {
+                ary [k][i] = y [i];
+                arx [k][i] = mean [i] + sigma * y [i];
+            }
+            bounds.clampInPlace (arx [k]);
+            fitness [k] = problem.evaluate (arx [k]);
+            updateBest (arx [k], fitness [k]);
+
+            // Mirror: mean - sigma * y
+            int km = k + halfLambda;
+            for (int i = 0; i < d; i++)
+            {
+                ary [km][i] = -y [i];
+                arx [km][i] = mean [i] - sigma * y [i];
+            }
+            bounds.clampInPlace (arx [km]);
+            fitness [km] = problem.evaluate (arx [km]);
+            updateBest (arx [km], fitness [km]);
+        }
+
+        // 2. Sort by fitness (ascending)
+        Integer [] idx = new Integer [lambda];
+        for (int i = 0; i < lambda; i++) idx [i] = i;
+        Arrays.sort (idx, (a, b) -> Double.compare (fitness [a], fitness [b]));
+
+        // 3. New mean (weighted recombination of mu best)
+        double [] oldMean = mean.clone ();
+        mean = new double [d];
+        for (int j = 0; j < mu; j++)
+        {
+            int ii = idx [j];
+            for (int i = 0; i < d; i++)
+                mean [i] += weightsPositive [j] * arx [ii][i];
+        }
+
+        // Normalized difference
+        double [] meanDiffNorm = new double [d];
+        for (int i = 0; i < d; i++)
+            meanDiffNorm [i] = (mean [i] - oldMean [i]) / sigma;
+
+        // 4. Update p_sigma (CSA)
+        double [] invsqrtCdiff = matVecMul (invsqrtC, meanDiffNorm);
+        double csigFac = Math.sqrt (csig * (2.0 - csig) * mueff);
+        for (int i = 0; i < d; i++)
+            ps [i] = (1.0 - csig) * ps [i] + csigFac * invsqrtCdiff [i];
+
+        double psNorm = vecNorm (ps);
+
+        // 5. h_sigma indicator and p_c update
+        double hsigThresh = (1.4 + 2.0 / (d + 1.0)) * chiN
+                * Math.sqrt (1.0 - Math.pow (1.0 - csig, 2.0 * (generation + 1)));
+        int hsig = (psNorm < hsigThresh) ? 1 : 0;
+
+        double ccFac = Math.sqrt (cc * (2.0 - cc) * mueff);
+        for (int i = 0; i < d; i++)
+            pc [i] = (1.0 - cc) * pc [i] + hsig * ccFac * meanDiffNorm [i];
+
+        // 6. ACTIVE covariance matrix update
+        double deltaHsig = (1 - hsig) * cc * (2.0 - cc);
+        double cOld = 1.0 - c1 - cmu + deltaHsig * c1;
+
+        for (int i = 0; i < d; i++)
+        {
+            for (int j = 0; j <= i; j++)
+            {
+                // rank-1 update
+                double rank1 = c1 * pc [i] * pc [j];
+
+                // rank-mu update (positive weights — best mu)
+                double rankmuPos = 0;
+                for (int k = 0; k < mu; k++)
+                {
+                    int ii = idx [k];
+                    rankmuPos += weightsPositive [k] * ary [ii][i] * ary [ii][j];
+                }
+
+                // ACTIVE update (negative weights — worst mu)
+                // Use C^{-1/2} * y to normalize, preventing blow-up
+                double rankmuNeg = 0;
+                for (int k = 0; k < lambda - mu; k++)
+                {
+                    int ii = idx [mu + k];  // worst individuals
+                    // Normalize y by its Mahalanobis norm for numerical safety
+                    double [] yNorm = ary [ii];
+                    double mahalNorm = 0;
+                    double [] cy = matVecMul (invsqrtC, yNorm);
+                    for (int q = 0; q < d; q++) mahalNorm += cy [q] * cy [q];
+                    mahalNorm = Math.max (mahalNorm, 1e-20);
+                    double normFactor = d / mahalNorm;
+                    rankmuNeg += weightsNegative [k] * normFactor * yNorm [i] * yNorm [j];
+                }
+
+                C [i][j] = cOld * C [i][j] + rank1 + cmu * (rankmuPos + rankmuNeg);
+                C [j][i] = C [i][j];
+            }
+        }
+
+        // 7. Update sigma
+        sigma *= Math.exp ((csig / dsig) * (psNorm / chiN - 1.0));
+        sigma = Math.max (sigma, 1e-20);
+        sigma = Math.min (sigma, 1e6);
+
+        // 8. Eigendecomposition
+        eigenCounter++;
+        if (eigenCounter >= 1)
+        {
+            eigenDecomposition ();
+            eigenCounter = 0;
+        }
+
+        generation++;
+
+        // 9. Stagnation detection and IPOP restart
+        double genBest = fitness [idx [0]];
+        if (genBest < prevBestGen - 1e-12)
+        {
+            stagnationCounter = 0;
+            prevBestGen = genBest;
+        }
+        else
+        {
+            stagnationCounter++;
+        }
+
+        if (shouldRestart ())
+            restart ();
+    }
+
+    // ================================================================
+    //  RESTART IPOP with Covariance Memory
+    // ================================================================
+    private boolean shouldRestart ()
+    {
+        if (stagnationCounter > maxStagnation) return true;
+
+        double maxD = diagD [0], minD = diagD [0];
+        for (int i = 1; i < d; i++)
+        {
+            if (diagD [i] > maxD) maxD = diagD [i];
+            if (diagD [i] < minD) minD = diagD [i];
+        }
+        if (minD > 0 && (maxD / minD) > 1e7) return true;
+        if (sigma * maxD < 1e-12) return true;
+
+        return false;
+    }
+
+    private void restart ()
+    {
+        restartCount++;
+
+        // Save covariance matrix before restart
+        savedC = new double [d][d];
+        for (int i = 0; i < d; i++)
+            for (int j = 0; j < d; j++)
+                savedC [i][j] = C [i][j];
+
+        int newLambda = lambda0 * (1 << Math.min (restartCount, 8));
+        newLambda = Math.min (newLambda, 512);
+
+        double [] newMean;
+        double newSigma = sigma0;
+        double choice = rng.nextDouble ();
+
+        if (choice < 0.40 && cachedSeeds != null && !cachedSeeds.isEmpty ())
+        {
+            int idx = restartCount % cachedSeeds.size ();
+            newMean = quickLocalOptimize (cachedSeeds.get (idx).clone (), 500);
+        }
+        else if (choice < 0.70 && bestX != null)
+        {
+            newMean = bestX.clone ();
+            for (int i = 0; i < d; i++)
+                newMean [i] += rng.nextGaussian () * bounds.getRange (i) * 0.15;
+            bounds.clampInPlace (newMean);
+            newSigma = sigma0 / 2.0;
+        }
+        else
+        {
+            double [] bSeed = problem.getRandomControlPoints1DArray ();
+            bounds.clampInPlace (bSeed);
+            double bF = problem.evaluate (bSeed);
+            updateBest (bSeed, bF);
+            for (int r = 0; r < 3; r++)
+            {
+                double [] s = problem.getRandomControlPoints1DArray ();
+                bounds.clampInPlace (s);
+                double f = problem.evaluate (s);
+                updateBest (s, f);
+                if (f < bF) { bF = f; bSeed = s; }
+            }
+            int nCP = d / 2;
+            for (int r = 0; r < 4; r++)
+            {
+                double [] s = new double [d];
+                for (int i = 0; i < nCP; i++)
+                {
+                    s [2 * i]     = rng.nextBoolean () ? bounds.getLb () [0] : bounds.getUb () [0];
+                    s [2 * i + 1] = bounds.getLb () [1] + rng.nextDouble () * bounds.getRange (1);
+                }
+                bounds.clampInPlace (s);
+                double f = problem.evaluate (s);
+                updateBest (s, f);
+                if (f < bF) { bF = f; bSeed = s; }
+            }
+            newMean = bSeed;
+        }
+
+        // Pass savedC for covariance memory
+        setupCMAES (newLambda, newMean, newSigma, savedC);
+    }
+
+    // ================================================================
+    //  EIGENDECOMPOSITION (tred2 + tql2, public domain JAMA)
+    // ================================================================
+    private void eigenDecomposition ()
+    {
+        double [][] V = new double [d][d];
+        for (int i = 0; i < d; i++)
+            for (int j = 0; j < d; j++)
+                V [i][j] = C [i][j];
+
+        double [] dd = new double [d];
+        double [] ee = new double [d];
+
+        tred2 (V, dd, ee);
+        tql2  (V, dd, ee);
+
+        for (int i = 0; i < d; i++)
+            diagD [i] = Math.sqrt (Math.max (dd [i], 1e-20));
+
+        B = V;
+
+        for (int i = 0; i < d; i++)
+        {
+            for (int j = 0; j <= i; j++)
+            {
+                double sum = 0;
+                for (int k = 0; k < d; k++)
+                    sum += B [i][k] * (1.0 / diagD [k]) * B [j][k];
+                invsqrtC [i][j] = sum;
+                invsqrtC [j][i] = sum;
+            }
+        }
+    }
+
+    private void tred2 (double [][] V, double [] d, double [] e)
+    {
+        int n = this.d;
+        for (int j = 0; j < n; j++) d [j] = V [n - 1][j];
+
+        for (int i = n - 1; i > 0; i--)
+        {
+            double scale = 0, h = 0;
+            for (int k = 0; k < i; k++) scale += Math.abs (d [k]);
+
+            if (scale == 0.0)
+            {
+                e [i] = d [i - 1];
+                for (int j = 0; j < i; j++) { d [j] = V [i - 1][j]; V [i][j] = 0; V [j][i] = 0; }
+            }
+            else
+            {
+                for (int k = 0; k < i; k++) { d [k] /= scale; h += d [k] * d [k]; }
+                double f = d [i - 1];
+                double g = Math.sqrt (h);
+                if (f > 0) g = -g;
+                e [i] = scale * g;
+                h -= f * g;
+                d [i - 1] = f - g;
+                for (int j = 0; j < i; j++) e [j] = 0;
+
+                for (int j = 0; j < i; j++)
+                {
+                    f = d [j]; V [j][i] = f;
+                    g = e [j] + V [j][j] * f;
+                    for (int k = j + 1; k <= i - 1; k++) { g += V [k][j] * d [k]; e [k] += V [k][j] * f; }
+                    e [j] = g;
+                }
+                f = 0;
+                for (int j = 0; j < i; j++) { e [j] /= h; f += e [j] * d [j]; }
+                double hh = f / (h + h);
+                for (int j = 0; j < i; j++) e [j] -= hh * d [j];
+                for (int j = 0; j < i; j++)
+                {
+                    f = d [j]; g = e [j];
+                    for (int k = j; k <= i - 1; k++) V [k][j] -= f * e [k] + g * d [k];
+                    d [j] = V [i - 1][j]; V [i][j] = 0;
+                }
+            }
+            d [i] = h;
+        }
+
+        for (int i = 0; i < n - 1; i++)
+        {
+            V [n - 1][i] = V [i][i]; V [i][i] = 1;
+            double h = d [i + 1];
+            if (h != 0)
+            {
+                for (int k = 0; k <= i; k++) d [k] = V [k][i + 1] / h;
+                for (int j = 0; j <= i; j++)
+                {
+                    double g = 0;
+                    for (int k = 0; k <= i; k++) g += V [k][i + 1] * V [k][j];
+                    for (int k = 0; k <= i; k++) V [k][j] -= g * d [k];
+                }
+            }
+            for (int k = 0; k <= i; k++) V [k][i + 1] = 0;
+        }
+        for (int j = 0; j < n; j++) { d [j] = V [n - 1][j]; V [n - 1][j] = 0; }
+        V [n - 1][n - 1] = 1;
+        e [0] = 0;
+    }
+
+    private void tql2 (double [][] V, double [] d, double [] e)
+    {
+        int n = this.d;
+        for (int i = 1; i < n; i++) e [i - 1] = e [i];
+        e [n - 1] = 0;
+
+        double f = 0, tst1 = 0;
+        double eps = Math.pow (2.0, -52.0);
+
+        for (int l = 0; l < n; l++)
+        {
+            tst1 = Math.max (tst1, Math.abs (d [l]) + Math.abs (e [l]));
+            int m = l;
+            while (m < n) { if (Math.abs (e [m]) <= eps * tst1) break; m++; }
+
+            if (m > l)
+            {
+                int iter = 0;
+                do
+                {
+                    iter++;
+                    double g = d [l];
+                    double p = (d [l + 1] - g) / (2.0 * e [l]);
+                    double r = Math.hypot (p, 1.0);
+                    if (p < 0) r = -r;
+                    d [l] = e [l] / (p + r);
+                    d [l + 1] = e [l] * (p + r);
+                    double dl1 = d [l + 1];
+                    double h = g - d [l];
+                    for (int i = l + 2; i < n; i++) d [i] -= h;
+                    f += h;
+
+                    p = d [m]; double c = 1, c2 = c, c3 = c;
+                    double el1 = e [l + 1]; double s = 0, s2 = 0;
+                    for (int i = m - 1; i >= l; i--)
+                    {
+                        c3 = c2; c2 = c; s2 = s;
+                        g = c * e [i]; h = c * p;
+                        r = Math.hypot (p, e [i]);
+                        e [i + 1] = s * r; s = e [i] / r; c = p / r;
+                        p = c * d [i] - s * g;
+                        d [i + 1] = h + s * (c * g + s * d [i]);
+                        for (int k = 0; k < n; k++)
+                        {
+                            h = V [k][i + 1];
+                            V [k][i + 1] = s * V [k][i] + c * h;
+                            V [k][i]     = c * V [k][i] - s * h;
+                        }
+                    }
+                    p = -s * s2 * c3 * el1 * e [l] / dl1;
+                    e [l] = s * p; d [l] = c * p;
+                }
+                while (Math.abs (e [l]) > eps * tst1);
+            }
+            d [l] = d [l] + f; e [l] = 0;
+        }
+
+        for (int i = 0; i < n - 1; i++)
+        {
+            int k = i; double p = d [i];
+            for (int j = i + 1; j < n; j++) if (d [j] < p) { k = j; p = d [j]; }
+            if (k != i)
+            {
+                d [k] = d [i]; d [i] = p;
+                for (int j = 0; j < n; j++) { p = V [j][i]; V [j][i] = V [j][k]; V [j][k] = p; }
+            }
+        }
+    }
+
+    // ===== Vector / matrix utilities =====
+
+    private double [] matVecMul (double [][] M, double [] v)
+    {
+        double [] r = new double [d];
+        for (int i = 0; i < d; i++)
+            for (int j = 0; j < d; j++)
+                r [i] += M [i][j] * v [j];
+        return r;
+    }
+
+    private double vecNorm (double [] v)
+    {
+        double s = 0;
+        for (double vi : v) s += vi * vi;
+        return Math.sqrt (s);
+    }
+
+    private void updateBest (double [] x, double f)
+    {
+        if (f < bestFitness)
+        {
+            bestFitness = f;
+            bestX = x.clone ();
+        }
+    }
+
+    @Override
+    public double [] getBestX () { return bestX; }
+
+    public double getBestFitness () { return bestFitness; }
+}
