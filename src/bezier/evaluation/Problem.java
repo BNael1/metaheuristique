@@ -18,6 +18,9 @@ public final class Problem
     private static final double CURVATURE = 1.;
     private static final double BOUNDARY = 100.;
 
+    /** Skip chart updates for headless benchmark runs. */
+    public static boolean headless = false;
+
     private Random random;
     private double bestEvaluation;
     private Bezier bestBezier;
@@ -269,8 +272,11 @@ public final class Problem
                 }
             }
         }
-        BezierChart.getInstance ().changeBezier (this.bestBezier.getTrajectory ());
-        MonitorChart.getInstance ().addData (evaluation, this.getBestEvaluation ());
+        if (!Problem.headless)
+        {
+            BezierChart.getInstance ().changeBezier (this.bestBezier.getTrajectory ());
+            MonitorChart.getInstance ().addData (evaluation, this.getBestEvaluation ());
+        }
         return evaluation;
     }
 

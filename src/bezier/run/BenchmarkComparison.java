@@ -17,6 +17,10 @@ import bezier.projects.competitor.nbipop.NBIPOPProject;
 import bezier.projects.competitor.alconst.ALConstraintProject;
 import bezier.projects.competitor.rfsurr.RFSurrogateProject;
 import bezier.projects.competitor.islands.IslandProject;
+import bezier.projects.competitor.optipath.OptiPathGridBipop;
+import bezier.projects.competitor.optipath.OptiPathStochRank;
+import bezier.projects.competitor.optipath.OptiPathAStarRepair;
+import bezier.projects.competitor.optipath.OptiPathSepWarmup;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -44,16 +48,19 @@ public class BenchmarkComparison
 {
     private static int NB_SECONDS = 60;
     private static int NB_RUNS    = 3;
-    private static final String CSV_PATH = "results/bench_results.csv";
+    private static String CSV_PATH = "results/bench_results.csv";
 
     // Tous les algorithmes : base + variantes
     private static final String [] ALL_ALGOS =
             {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "BipopAdaptif",
-             "LMCMA", "AStarSeeds", "NBIPOP", "ALConstraint", "RFSurrogate", "Islands"};
+             "LMCMA", "AStarSeeds", "NBIPOP", "ALConstraint", "RFSurrogate", "Islands",
+             "GridBIPOP", "StochRank", "AStarRepair", "SepWarmup"};
 
     public static void main (String [] args) throws Exception
     {
         boolean reset = false;
+        boolean headless = false;
+        String onlyAlgo = null;
 
         for (int i = 0; i < args.length; i++)
         {
@@ -63,7 +70,20 @@ public class BenchmarkComparison
                 NB_RUNS = Integer.parseInt (args [++i]);
             else if (args [i].equals ("--reset"))
                 reset = true;
+            else if (args [i].equals ("--headless"))
+                headless = true;
+            else if (args [i].equals ("--only") && i + 1 < args.length)
+                onlyAlgo = args [++i];
         }
+
+        if (headless)
+        {
+            System.err.println ("Mode headless : pas de fenetres.");
+            Problem.headless = true;
+        }
+
+        if (onlyAlgo != null)
+            CSV_PATH = "results/bench_" + onlyAlgo + ".csv";
 
         new File ("results").mkdirs ();
         File csvFile = new File (CSV_PATH);
@@ -146,6 +166,7 @@ public class BenchmarkComparison
         // --- Executer les combinaisons manquantes ---
         for (int a = 0; a < ALL_ALGOS.length; a++)
         {
+            if (onlyAlgo != null && !ALL_ALGOS [a].equals (onlyAlgo)) continue;
             for (int p = 0; p < problems.size (); p++)
             {
                 Problem problem = problems.get (p);
@@ -157,8 +178,11 @@ public class BenchmarkComparison
                             + " / run " + run + " ... ");
 
                     problem.reset ();
-                    MonitorChart.getNewInstance (ALL_ALGOS [a] + " " + problem.getName () + " #" + run);
-                    BezierChart.getNewInstance (problem);
+                    if (!headless)
+                    {
+                        MonitorChart.getNewInstance (ALL_ALGOS [a] + " " + problem.getName () + " #" + run);
+                        BezierChart.getNewInstance (problem);
+                    }
 
                     try
                     {
@@ -254,6 +278,10 @@ public class BenchmarkComparison
             case "ALConstraint": return new ALConstraintProject    (problem);
             case "RFSurrogate":  return new RFSurrogateProject     (problem);
             case "Islands":      return new IslandProject          (problem);
+            case "GridBIPOP":    return new OptiPathGridBipop      (problem);
+            case "StochRank":    return new OptiPathStochRank      (problem);
+            case "AStarRepair":  return new OptiPathAStarRepair    (problem);
+            case "SepWarmup":    return new OptiPathSepWarmup      (problem);
             default:             return new OptiPath              (problem);
         }
     }
