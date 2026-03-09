@@ -70,7 +70,7 @@ public final class Problem
 
     private Problem (String filename)
     {
-        String [] parts = filename.split ("/|\\.");
+        String [] parts = filename.split ("/|\\\\|\\.");
         this.name = parts [parts.length - 2];
         try (BufferedReader in = new BufferedReader (new FileReader (new File (filename))))
         {

@@ -11,6 +11,12 @@ import bezier.projects.competitor.optipath.OptiPathMultiSegment;
 import bezier.projects.competitor.de.OptiPathDE;
 import bezier.projects.competitor.de.OptiPathShade;
 import bezier.projects.competitor.ga.OptiPathGA;
+import bezier.projects.competitor.lmcma.LMCMAProject;
+import bezier.projects.competitor.astarseeds.AStarSeedsProject;
+import bezier.projects.competitor.nbipop.NBIPOPProject;
+import bezier.projects.competitor.alconst.ALConstraintProject;
+import bezier.projects.competitor.rfsurr.RFSurrogateProject;
+import bezier.projects.competitor.islands.IslandProject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -42,7 +48,8 @@ public class BenchmarkComparison
 
     // Tous les algorithmes : base + variantes
     private static final String [] ALL_ALGOS =
-            {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "BipopAdaptif"};
+            {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "BipopAdaptif",
+             "LMCMA", "AStarSeeds", "NBIPOP", "ALConstraint", "RFSurrogate", "Islands"};
 
     public static void main (String [] args) throws Exception
     {
@@ -241,6 +248,12 @@ public class BenchmarkComparison
             case "BIPOP":        return new OptiPathBipop         (problem);
             case "SHADE":        return new OptiPathShade         (problem);
             case "BipopAdaptif": return new OptiPathBipopAdaptif  (problem);
+            case "LMCMA":        return new LMCMAProject          (problem);
+            case "AStarSeeds":   return new AStarSeedsProject     (problem);
+            case "NBIPOP":       return new NBIPOPProject          (problem);
+            case "ALConstraint": return new ALConstraintProject    (problem);
+            case "RFSurrogate":  return new RFSurrogateProject     (problem);
+            case "Islands":      return new IslandProject          (problem);
             default:             return new OptiPath              (problem);
         }
     }
