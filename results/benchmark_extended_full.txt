@@ -1,0 +1,68 @@
+Starting Extended Bounds benchmark...
+Configs: baseline, margin3, margin5, margin8
+Problems: prob1-prob4, 3 runs each, 60s per run
+Total estimated time: ~48 minutes
+
+baseline / prob1 / run 1 ... score = 36,41
+baseline / prob1 / run 2 ... score = 37,61
+baseline / prob1 / run 3 ... score = 36,37
+baseline / prob2 / run 1 ... score = 31,56
+baseline / prob2 / run 2 ... score = 31,48
+baseline / prob2 / run 3 ... score = 31,51
+baseline / prob3 / run 1 ... score = 28,89
+baseline / prob3 / run 2 ... score = 29,62
+baseline / prob3 / run 3 ... score = 29,61
+baseline / prob4 / run 1 ... score = 3095,44
+baseline / prob4 / run 2 ... score = 5750,24
+baseline / prob4 / run 3 ... score = 5689,55
+margin3 / prob1 / run 1 ... score = 36,32
+margin3 / prob1 / run 2 ... score = 37,35
+margin3 / prob1 / run 3 ... score = 36,32
+margin3 / prob2 / run 1 ... score = 31,42
+margin3 / prob2 / run 2 ... score = 31,42
+margin3 / prob2 / run 3 ... score = 31,42
+margin3 / prob3 / run 1 ... score = 28,69
+margin3 / prob3 / run 2 ... score = 28,28
+margin3 / prob3 / run 3 ... score = 28,22
+margin3 / prob4 / run 1 ... score = 4633,43
+margin3 / prob4 / run 2 ... score = 4614,31
+margin3 / prob4 / run 3 ... score = 2300,45
+margin5 / prob1 / run 1 ... score = 36,33
+margin5 / prob1 / run 2 ... score = 37,66
+margin5 / prob1 / run 3 ... score = 36,35
+margin5 / prob2 / run 1 ... score = 31,42
+margin5 / prob2 / run 2 ... score = 31,42
+margin5 / prob2 / run 3 ... score = 31,42
+margin5 / prob3 / run 1 ... score = 29,60
+margin5 / prob3 / run 2 ... score = 28,22
+margin5 / prob3 / run 3 ... score = 28,82
+margin5 / prob4 / run 1 ... score = 2117,15
+margin5 / prob4 / run 2 ... score = 1958,42
+margin5 / prob4 / run 3 ... score = 3845,65
+margin8 / prob1 / run 1 ... score = 36,36
+margin8 / prob1 / run 2 ... score = 37,49
+margin8 / prob1 / run 3 ... score = 37,36
+margin8 / prob2 / run 1 ... score = 31,42
+margin8 / prob2 / run 2 ... score = 31,42
+margin8 / prob2 / run 3 ... score = 31,42
+margin8 / prob3 / run 1 ... score = 28,29
+margin8 / prob3 / run 2 ... score = 28,21
+margin8 / prob3 / run 3 ... score = 28,26
+margin8 / prob4 / run 1 ... score = 1538,28
+margin8 / prob4 / run 2 ... score = 3161,65
+margin8 / prob4 / run 3 ... score = 3265,50
+
+=== RESULTATS EXTENDED BOUNDS ===
+
+Problem    | baseline         | margin3          | margin5          | margin8         
+---------- | ---------------- | ---------------- | ---------------- | ----------------
+prob1      |   36,80 (  36,37) |   36,67 (  36,32) |   36,78 (  36,33) |   37,07 (  36,36)
+prob2      |   31,52 (  31,48) |   31,42 (  31,42) |   31,42 (  31,42) |   31,42 (  31,42)
+prob3      |   29,37 (  28,89) |   28,40 (  28,22) |   28,88 (  28,22) |   28,25 (  28,21)
+prob4      | 4845,08 (3095,44) | 3849,40 (2300,45) | 2640,41 (1958,42) | 2655,14 (1538,28)
+
+Format: mean (best)
+CSV saved to: results/bench_ExtendedBounds.csv
+
+Benchmark complete. Results in results/bench_ExtendedBounds.csv
+Appuyez sur une touche pour continuer... 
