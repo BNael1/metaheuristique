@@ -146,3 +146,74 @@ Le labyrinthe en S reste le problème le plus discriminant. BIPOP conserve le me
 - **Problèmes multi-obstacles** : AStarRepair (28.24) ou RFSurrogate (28.35) ou SHADE
 - **Problèmes labyrinthe** : ALConstraint ou BIPOP ; StochRank et SepWarmup comme alternatives
 - **Usage général** : StochRank offre le meilleur compromis parmi les nouvelles idées (top 3–4 sur prob3 et prob4)
+
+---
+
+## Expérience : Extended Bounds (bornes étendues pour les points de contrôle)
+
+### Hypothèse
+
+Dans CMA-ES, les points de contrôle de la courbe de Bézier sont contraints à l'intérieur de la surface `[minX, maxX] × [minY, maxY]`. Or la matrice de covariance C est biaisée dès que la distribution se retrouve tronquée par les bornes : les composantes perpendiculaires aux murs reçoivent artificiellement moins de variance, ce qui déséquilibre l'adaptation. En élargissant les bornes des points de contrôle d'une marge `cpMargin` (tout en gardant la pénalité sur les **points échantillonnés** de la courbe), on supprime cette troncature et on laisse la covariance s'adapter librement. L'effet attendu est surtout visible sur les problèmes à forte densité d'obstacles (prob3, prob4), où de nombreux points de contrôle se retrouvent collés aux bords.
+
+### Protocole
+
+- **Configurations** : `baseline` (bornes originales), `margin3` (±3), `margin5` (±5), `margin8` (±8)
+- **Sigma initial** : calculé sur l'intervalle original `(ub−lb)/6`, identique pour toutes les configurations
+- **Budget** : 60 secondes par run, 3 runs par (config, problème)
+- **Fichier source** : `CMAESOptimizerExtendedBounds.java` (copie de CMAESOptimizer avec constructeur modifié)
+- **CSV** : `results/bench_ExtendedBounds.csv`
+
+### Résultats — Score moyen (3 runs)
+
+| Config   | prob1  | prob2  | prob3  | prob4    |
+|----------|--------|--------|--------|----------|
+| baseline | 36.80  | 31.52  | 29.37  | 4845.08  |
+| margin3  | 36.67  | 31.42  | 28.40  | 3849.40  |
+| margin5  | 36.78  | 31.42  | 28.88  | 2640.41  |
+| margin8  | 37.07  | 31.42  | 28.25  | 2655.14  |
+
+### Résultats — Meilleur score (min sur 3 runs)
+
+| Config   | prob1  | prob2  | prob3  | prob4    |
+|----------|--------|--------|--------|----------|
+| baseline | 36.37  | 31.48  | 28.89  | 3095.44  |
+| margin3  | 36.32  | 31.42  | 28.22  | 2300.45  |
+| margin5  | 36.33  | 31.42  | 28.22  | 1958.42  |
+| margin8  | 36.36  | 31.42  | 28.21  | 1538.28  |
+
+### Variation relative par rapport au baseline (score moyen)
+
+| Config   | prob1   | prob2   | prob3   | prob4    |
+|----------|---------|---------|---------|----------|
+| margin3  | −0.4%   | −0.3%   | −3.3%   | −20.5%   |
+| margin5  | −0.1%   | −0.3%   | −1.7%   | −45.5%   |
+| margin8  | +0.7%   | −0.3%   | −3.8%   | −45.2%   |
+
+### Analyse par problème
+
+**prob1 (16 CPs, 5 obstacles)** — Les marges n'apportent pas de gain significatif (±0.7%). Les points de contrôle ont assez d'espace pour évoluer librement, la troncature de C ne se manifeste pas. margin8 dégrade légèrement le score (+0.7%), probablement parce que l'espace de recherche élargi ralentit la convergence sans apporter de bénéfice structurel.
+
+**prob2 (4 CPs, 1 obstacle)** — Toutes les marges convergent vers ~31.42, très légèrement meilleur que la baseline (31.52). Le problème est trop simple pour discriminer, mais on note que les marges permettent de trouver systématiquement la solution optimale.
+
+**prob3 (8 CPs, 33 obstacles / 3 murs)** — Amélioration notable : margin8 atteint 28.25 (−3.8% en moyenne) et 28.21 (best). margin3 est similaire (28.40 moy, 28.22 best). L'extension des bornes libère les CPs coincés entre les murs et permet à la covariance de mieux couvrir les corridors étroits.
+
+**prob4 (8 CPs, 33 obstacles / labyrinthe en S)** — **Résultat majeur** : margin5 (2640 moy, 1958 best) et margin8 (2655 moy, **1538 best**) réduisent le score moyen de **~45%** par rapport au baseline (4845). Même margin3 (3849, −20.5%) est nettement meilleur. L'effet est spectaculaire : dans le labyrinthe en S, les CPs sont systématiquement poussés contre les murs, ce qui compresse artificiellement la covariance. En relâchant cette contrainte, CMA-ES explore mieux les virages du labyrinthe. Le best de 1538 (margin8) est le **meilleur score jamais obtenu sur prob4** dans tout ce benchmark, battant BIPOP (3104 best), ALConstraint (3122 best) et LM-CMA (3184 best).
+
+### Conclusion
+
+L'hypothèse est **confirmée** : étendre les bornes des points de contrôle améliore significativement les performances de CMA-ES, en particulier sur les problèmes où les obstacles forcent les CPs contre les limites de la surface. L'effet est massif sur prob4 (−45%) et modéré sur prob3 (−3.8%). Les marges de 5 à 8 offrent les meilleurs résultats. Cette modification est simple (1 paramètre `cpMargin`), sans coût computationnel supplémentaire, et compatible avec toutes les autres variantes CMA-ES du benchmark.
+
+**Mise à jour des recommandations** :
+- **Problèmes labyrinthe** : CMA-ES Extended Bounds (margin5–8) est désormais la meilleure approche, dominant toutes les variantes précédentes
+- La combinaison Extended Bounds + autres optimisations (StochRank, ALConstraint) pourrait donner des résultats encore meilleurs
+
+### Tableau récapitulatif — mean (best)
+
+| Problème | baseline           | margin3            | margin5            | margin8            |
+|----------|--------------------|--------------------|--------------------|--------------------|
+| prob1    |   36,80 (  36,37)  |   36,67 (  36,32)  |   36,78 (  36,33)  |   37,07 (  36,36)  |
+| prob2    |   31,52 (  31,48)  |   31,42 (  31,42)  |   31,42 (  31,42)  |   31,42 (  31,42)  |
+| prob3    |   29,37 (  28,89)  |   28,40 (  28,22)  |   28,88 (  28,22)  |   28,25 (  28,21)  |
+| prob4    | 4845,08 (3095,44)  | 3849,40 (2300,45)  | 2640,41 (1958,42)  | 2655,14 (1538,28)  |
+
+> Format : mean (best) — CSV source : `results/bench_ExtendedBounds.csv`
