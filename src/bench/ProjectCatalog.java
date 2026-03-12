@@ -1,0 +1,193 @@
+package bench;
+
+import engine.cmaes.CMAESBuilder;
+import engine.de.DECore;
+import engine.de.DESHADECore;
+import engine.ga.GACore;
+import bezier.evaluation.Problem;
+import bezier.projects.CompetitorProject;
+import bezier.projects.InvalidProjectException;
+import bench.competitors.lmcma.LMCMAProject;
+import bench.competitors.nbipop.NBIPOPProject;
+import bench.competitors.astarseeds.AStarSeedsProject;
+import bench.competitors.alconst.ALConstraintProject;
+import bench.competitors.rfsurr.RFSurrogateProject;
+import bench.competitors.islands.IslandProject;
+import engine.constraints.BoundsChecker;
+
+/**
+ * Catalogue de tous les projets disponibles via la nouvelle architecture.
+ *
+ * Chaque méthode retourne un OptimizerProject prêt à exécuter (init + loop).
+ * Les anciens fichiers OptiPath.java, OptiPathDE.java, etc. sont remplacés.
+ *
+ * Utilisation :
+ * <pre>
+ *   Project p = ProjectCatalog.ipop(problem);
+ *   // ou
+ *   Project p = ProjectCatalog.full(problem);
+ * </pre>
+ */
+public class ProjectCatalog
+{
+    private ProjectCatalog () {}
+
+    // === CMA-ES variantes ===
+
+    public static OptimizerProject ipop (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "IPOP-CMA-ES",
+                () -> CMAESBuilder.ipop (problem).build ());
+    }
+
+    public static OptimizerProject bipop (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "BIPOP-CMA-ES",
+                () -> CMAESBuilder.bipop (problem).build ());
+    }
+
+    public static OptimizerProject active (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "Active CMA-ES",
+                () -> CMAESBuilder.active (problem).build ());
+    }
+
+    public static OptimizerProject surrogate (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "Surrogate CMA-ES",
+                () -> CMAESBuilder.surrogate (problem).build ());
+    }
+
+    public static OptimizerProject adaptiveBipop (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "Adaptive BIPOP CMA-ES",
+                () -> CMAESBuilder.adaptiveBipop (problem).build ());
+    }
+
+    public static OptimizerProject gridBipop (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "Grid BIPOP CMA-ES",
+                () -> CMAESBuilder.gridBipop (problem).build ());
+    }
+
+    public static OptimizerProject stochRank (Problem problem, double threshold)
+            throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "StochRank CMA-ES",
+                () -> CMAESBuilder.stochRank (problem, threshold).build ());
+    }
+
+    public static OptimizerProject sepWarmup (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "Sep-Warmup CMA-ES",
+                () -> CMAESBuilder.sepWarmup (problem).build ());
+    }
+
+    public static OptimizerProject full (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "Full CMA-ES (Active+Surrogate+AdaBIPOP)",
+                () -> CMAESBuilder.full (problem).build ());
+    }
+
+    // === DE variantes ===
+
+    public static OptimizerProject de (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "DE jDE",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    return new DECore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject shade (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "DE SHADE",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    return new DESHADECore (problem, d, lb, ub);
+                });
+    }
+
+    // === GA ===
+
+    public static OptimizerProject ga (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "GA SBX",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    return new GACore (problem, d, lb, ub);
+                });
+    }
+
+    // === Compétiteurs auto-contenus ===
+
+    public static CompetitorProject lmcma (Problem problem) throws InvalidProjectException
+    {
+        return new LMCMAProject (problem);
+    }
+
+    public static CompetitorProject nbipop (Problem problem) throws InvalidProjectException
+    {
+        return new NBIPOPProject (problem);
+    }
+
+    public static CompetitorProject astarSeeds (Problem problem) throws InvalidProjectException
+    {
+        return new AStarSeedsProject (problem);
+    }
+
+    public static CompetitorProject alConstraint (Problem problem) throws InvalidProjectException
+    {
+        return new ALConstraintProject (problem);
+    }
+
+    public static CompetitorProject rfSurrogate (Problem problem) throws InvalidProjectException
+    {
+        return new RFSurrogateProject (problem);
+    }
+
+    public static CompetitorProject islands (Problem problem) throws InvalidProjectException
+    {
+        return new IslandProject (problem);
+    }
+
+    // === Helpers ===
+
+    private static double [] buildLb (Problem p, int d)
+    {
+        double [] lb = new double [d];
+        for (int i = 0; i < d; i++)
+            lb [i] = (i % 2 == 0) ? p.getMinX () : p.getMinY ();
+        return lb;
+    }
+
+    private static double [] buildUb (Problem p, int d)
+    {
+        double [] ub = new double [d];
+        for (int i = 0; i < d; i++)
+            ub [i] = (i % 2 == 0) ? p.getMaxX () : p.getMaxY ();
+        return ub;
+    }
+
+    private static double [] buildInitMean (Problem p, int d)
+    {
+        int nCP = d / 2;
+        double [] m = new double [d];
+        double sx = p.getStartPoint ().getX (), sy = p.getStartPoint ().getY ();
+        double ex = p.getEndPoint ().getX (),   ey = p.getEndPoint ().getY ();
+        for (int i = 0; i < nCP; i++)
+        {
+            double t = (double) (i + 1) / (nCP + 1);
+            m [2 * i]     = sx + t * (ex - sx);
+            m [2 * i + 1] = sy + t * (ey - sy);
+        }
+        return m;
+    }
+}

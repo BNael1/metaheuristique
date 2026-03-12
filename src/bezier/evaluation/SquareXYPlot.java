@@ -11,16 +11,16 @@ import org.jfree.chart.plot.XYPlot;
 import org.jfree.chart.renderer.xy.XYItemRenderer;
 import org.jfree.data.xy.XYDataset;
 
-class SquareXYPlot extends XYPlot
+public class SquareXYPlot extends XYPlot
 {
     private double minX, maxX, minY, maxY;
 
-    SquareXYPlot ()
+    public SquareXYPlot ()
     {
         super();
     }
 
-    SquareXYPlot (XYDataset dataset, ValueAxis domainAxis, ValueAxis rangeAxis, XYItemRenderer renderer, 
+    public SquareXYPlot (XYDataset dataset, ValueAxis domainAxis, ValueAxis rangeAxis, XYItemRenderer renderer,
             double minX, double maxX, double minY, double maxY)
     {
         super (dataset, domainAxis, rangeAxis, renderer);

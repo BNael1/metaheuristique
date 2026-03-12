@@ -18,7 +18,7 @@ public final class Problem
     private static final double CURVATURE = 1.;
     private static final double BOUNDARY = 100.;
 
-    /** Skip chart updates for headless benchmark runs. */
+    /** Désactive les fenêtres graphiques legacy (BezierChart, MonitorChart). */
     public static boolean headless = false;
 
     private Random random;
@@ -73,7 +73,7 @@ public final class Problem
 
     private Problem (String filename)
     {
-        String [] parts = filename.split ("/|\\\\|\\.");
+        String [] parts = filename.split ("/|\\.");
         this.name = parts [parts.length - 2];
         try (BufferedReader in = new BufferedReader (new FileReader (new File (filename))))
         {
@@ -142,9 +142,19 @@ public final class Problem
         return endPoint;
     }
 
-    Obstacle getObstacle (int index)
+    public Obstacle getObstacle (int index)
     {
         return this.obstacles.get (index);
+    }
+
+    /**
+     * Calcule la trajectoire Bézier correspondant à un vecteur de décision.
+     * @param x vecteur de points de contrôle (alternance x/y)
+     * @return tableau de coordonnées de la trajectoire
+     */
+    public Coordinates[] computeTrajectory (double[] x)
+    {
+        return new Bezier (x, this.startPoint, this.endPoint).getTrajectory ();
     }
 
     /**
