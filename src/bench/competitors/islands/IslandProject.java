@@ -28,6 +28,7 @@ public class IslandProject extends CompetitorProject
     private int d;
     private BoundsChecker bounds;
     private Random rng;
+    private final double margin;
 
     // Par île
     private int [] isLambda, isMu;
@@ -64,10 +65,16 @@ public class IslandProject extends CompetitorProject
 
     public IslandProject (Problem problem) throws InvalidProjectException
     {
+        this (problem, 0.0);
+    }
+
+    public IslandProject (Problem problem, double margin) throws InvalidProjectException
+    {
         super (problem);
         this.addAuthor ("BENSAADI");
         this.addAuthor ("RAHALI");
         this.setMethodName ("Island CMA-ES");
+        this.margin = margin;
     }
 
     @Override
@@ -80,8 +87,8 @@ public class IslandProject extends CompetitorProject
         double [] lb = new double [d], ub = new double [d];
         for (int i = 0; i < d; i++)
         {
-            if (i % 2 == 0) { lb[i] = problem.getMinX(); ub[i] = problem.getMaxX(); }
-            else             { lb[i] = problem.getMinY(); ub[i] = problem.getMaxY(); }
+            if (i % 2 == 0) { lb[i] = problem.getMinX() - margin; ub[i] = problem.getMaxX() + margin; }
+            else             { lb[i] = problem.getMinY() - margin; ub[i] = problem.getMaxY() + margin; }
         }
         bounds = new BoundsChecker (lb, ub);
         lambda0 = 4 + (int)(3.0 * Math.log(d));

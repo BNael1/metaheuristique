@@ -14,13 +14,20 @@ import bezier.projects.InvalidProjectException;
 public class LMCMAProject extends CompetitorProject
 {
     private LMCMAOptimizer optimizer;
+    private final double margin;
 
     public LMCMAProject (Problem problem) throws InvalidProjectException
+    {
+        this (problem, 0.0);
+    }
+
+    public LMCMAProject (Problem problem, double margin) throws InvalidProjectException
     {
         super (problem);
         this.addAuthor ("BENSAADI");
         this.addAuthor ("RAHALI");
         this.setMethodName ("LM-CMA-ES");
+        this.margin = margin;
     }
 
     @Override
@@ -35,13 +42,13 @@ public class LMCMAProject extends CompetitorProject
         {
             if (i % 2 == 0)
             {
-                lb [i] = problem.getMinX ();
-                ub [i] = problem.getMaxX ();
+                lb [i] = problem.getMinX () - margin;
+                ub [i] = problem.getMaxX () + margin;
             }
             else
             {
-                lb [i] = problem.getMinY ();
-                ub [i] = problem.getMaxY ();
+                lb [i] = problem.getMinY () - margin;
+                ub [i] = problem.getMaxY () + margin;
             }
         }
 

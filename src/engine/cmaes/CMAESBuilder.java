@@ -46,6 +46,8 @@ public class CMAESBuilder
     private ConstraintHandler constraints;
     private SamplingStrategy sampling;
     private AlgorithmParameters parameters;
+    private double [] customLb;
+    private double [] customUb;
 
     public CMAESBuilder (Problem problem)
     {
@@ -89,6 +91,17 @@ public class CMAESBuilder
     }
 
     /**
+     * Override the default bounds (problem rectangle) with custom bounds.
+     * Arrays are cloned to avoid external mutation.
+     */
+    public CMAESBuilder bounds (double [] lb, double [] ub)
+    {
+        this.customLb = lb != null ? lb.clone () : null;
+        this.customUb = ub != null ? ub.clone () : null;
+        return this;
+    }
+
+    /**
      * Construit le CMAESCore avec les stratégies configurées.
      * Les valeurs non spécifiées utilisent les défauts (standard).
      */
@@ -96,11 +109,22 @@ public class CMAESBuilder
     {
         int nCP = problem.getNControlPoints ();
         int d = 2 * nCP;
-        double [] lb = new double [d], ub = new double [d];
-        for (int j = 0; j < d; j++)
+        double [] lb;
+        double [] ub;
+        if (customLb != null && customUb != null)
         {
-            lb [j] = (j % 2 == 0) ? problem.getMinX () : problem.getMinY ();
-            ub [j] = (j % 2 == 0) ? problem.getMaxX () : problem.getMaxY ();
+            lb = customLb.clone ();
+            ub = customUb.clone ();
+        }
+        else
+        {
+            lb = new double [d];
+            ub = new double [d];
+            for (int j = 0; j < d; j++)
+            {
+                lb [j] = (j % 2 == 0) ? problem.getMinX () : problem.getMinY ();
+                ub [j] = (j % 2 == 0) ? problem.getMaxX () : problem.getMaxY ();
+            }
         }
 
         double [] initMean = new double [d];

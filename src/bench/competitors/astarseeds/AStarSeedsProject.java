@@ -21,6 +21,7 @@ public class AStarSeedsProject extends CompetitorProject
     private int d;
     private BoundsChecker bounds;
     private Random rng;
+    private final double margin;
 
     private int lambda, mu;
     private double [] weights;
@@ -49,10 +50,16 @@ public class AStarSeedsProject extends CompetitorProject
 
     public AStarSeedsProject (Problem problem) throws InvalidProjectException
     {
+        this (problem, 0.0);
+    }
+
+    public AStarSeedsProject (Problem problem, double margin) throws InvalidProjectException
+    {
         super (problem);
         this.addAuthor ("BENSAADI");
         this.addAuthor ("RAHALI");
         this.setMethodName ("A*Seeds + IPOP-CMA-ES");
+        this.margin = margin;
     }
 
     @Override
@@ -66,8 +73,8 @@ public class AStarSeedsProject extends CompetitorProject
         double [] ub = new double [d];
         for (int i = 0; i < d; i++)
         {
-            if (i % 2 == 0) { lb [i] = problem.getMinX (); ub [i] = problem.getMaxX (); }
-            else             { lb [i] = problem.getMinY (); ub [i] = problem.getMaxY (); }
+            if (i % 2 == 0) { lb [i] = problem.getMinX () - margin; ub [i] = problem.getMaxX () + margin; }
+            else             { lb [i] = problem.getMinY () - margin; ub [i] = problem.getMaxY () + margin; }
         }
         bounds = new BoundsChecker (lb, ub);
 
@@ -161,10 +168,10 @@ public class AStarSeedsProject extends CompetitorProject
     {
         ArrayList<double []> seeds = new ArrayList<> ();
 
-        double mX = problem.getMinX ();
-        double MX = problem.getMaxX ();
-        double mY = problem.getMinY ();
-        double MY = problem.getMaxY ();
+        double mX = problem.getMinX () - margin;
+        double MX = problem.getMaxX () + margin;
+        double mY = problem.getMinY () - margin;
+        double MY = problem.getMaxY () + margin;
         double centerY = (mY + MY) / 2.0;
 
         // Construire la grille A* avec marge de sécurité de 1.5 (rayon + zone molle)

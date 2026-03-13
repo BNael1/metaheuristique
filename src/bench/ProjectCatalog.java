@@ -13,7 +13,7 @@ import bench.competitors.astarseeds.AStarSeedsProject;
 import bench.competitors.alconst.ALConstraintProject;
 import bench.competitors.rfsurr.RFSurrogateProject;
 import bench.competitors.islands.IslandProject;
-import engine.constraints.BoundsChecker;
+import engine.core.AlgorithmParameters;
 
 /**
  * Catalogue de tous les projets disponibles via la nouvelle architecture.
@@ -40,10 +40,34 @@ public class ProjectCatalog
                 () -> CMAESBuilder.ipop (problem).build ());
     }
 
+    public static OptimizerProject ipop (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "IPOP-CMA-ES",
+                () -> CMAESBuilder.ipop (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
+    }
+
     public static OptimizerProject bipop (Problem problem) throws InvalidProjectException
     {
         return new OptimizerProject (problem, "BIPOP-CMA-ES",
                 () -> CMAESBuilder.bipop (problem).build ());
+    }
+
+    public static OptimizerProject bipop (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "BIPOP-CMA-ES",
+                () -> CMAESBuilder.bipop (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
     }
 
     public static OptimizerProject active (Problem problem) throws InvalidProjectException
@@ -52,10 +76,34 @@ public class ProjectCatalog
                 () -> CMAESBuilder.active (problem).build ());
     }
 
+    public static OptimizerProject active (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "Active CMA-ES",
+                () -> CMAESBuilder.active (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
+    }
+
     public static OptimizerProject surrogate (Problem problem) throws InvalidProjectException
     {
         return new OptimizerProject (problem, "Surrogate CMA-ES",
                 () -> CMAESBuilder.surrogate (problem).build ());
+    }
+
+    public static OptimizerProject surrogate (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "Surrogate CMA-ES",
+                () -> CMAESBuilder.surrogate (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
     }
 
     public static OptimizerProject adaptiveBipop (Problem problem) throws InvalidProjectException
@@ -64,10 +112,34 @@ public class ProjectCatalog
                 () -> CMAESBuilder.adaptiveBipop (problem).build ());
     }
 
+    public static OptimizerProject adaptiveBipop (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "Adaptive BIPOP CMA-ES",
+                () -> CMAESBuilder.adaptiveBipop (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
+    }
+
     public static OptimizerProject gridBipop (Problem problem) throws InvalidProjectException
     {
         return new OptimizerProject (problem, "Grid BIPOP CMA-ES",
                 () -> CMAESBuilder.gridBipop (problem).build ());
+    }
+
+    public static OptimizerProject gridBipop (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "Grid BIPOP CMA-ES",
+                () -> CMAESBuilder.gridBipop (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
     }
 
     public static OptimizerProject stochRank (Problem problem, double threshold)
@@ -77,16 +149,53 @@ public class ProjectCatalog
                 () -> CMAESBuilder.stochRank (problem, threshold).build ());
     }
 
+    public static OptimizerProject stochRank (Problem problem, double threshold, double margin)
+            throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "StochRank CMA-ES",
+                () -> CMAESBuilder.stochRank (problem, threshold)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
+    }
+
     public static OptimizerProject sepWarmup (Problem problem) throws InvalidProjectException
     {
         return new OptimizerProject (problem, "Sep-Warmup CMA-ES",
                 () -> CMAESBuilder.sepWarmup (problem).build ());
     }
 
+    public static OptimizerProject sepWarmup (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "Sep-Warmup CMA-ES",
+                () -> CMAESBuilder.sepWarmup (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
+    }
+
     public static OptimizerProject full (Problem problem) throws InvalidProjectException
     {
         return new OptimizerProject (problem, "Full CMA-ES (Active+Surrogate+AdaBIPOP)",
                 () -> CMAESBuilder.full (problem).build ());
+    }
+
+    public static OptimizerProject full (Problem problem, double margin) throws InvalidProjectException
+    {
+        int d = 2 * problem.getNControlPoints ();
+        double [] lb = buildLb (problem, d, margin);
+        double [] ub = buildUb (problem, d, margin);
+        return new OptimizerProject (problem, "Full CMA-ES (Active+Surrogate+AdaBIPOP)",
+                () -> CMAESBuilder.full (problem)
+                        .bounds (lb, ub)
+                        .parameters (paramsWithMargin (margin))
+                        .build ());
     }
 
     // === DE variantes ===
@@ -102,6 +211,17 @@ public class ProjectCatalog
                 });
     }
 
+    public static OptimizerProject de (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "DE jDE",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d, margin);
+                    double [] ub = buildUb (problem, d, margin);
+                    return new DECore (problem, d, lb, ub);
+                });
+    }
+
     public static OptimizerProject shade (Problem problem) throws InvalidProjectException
     {
         return new OptimizerProject (problem, "DE SHADE",
@@ -109,6 +229,17 @@ public class ProjectCatalog
                     int d = 2 * problem.getNControlPoints ();
                     double [] lb = buildLb (problem, d);
                     double [] ub = buildUb (problem, d);
+                    return new DESHADECore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject shade (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "DE SHADE",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d, margin);
+                    double [] ub = buildUb (problem, d, margin);
                     return new DESHADECore (problem, d, lb, ub);
                 });
     }
@@ -126,6 +257,17 @@ public class ProjectCatalog
                 });
     }
 
+    public static OptimizerProject ga (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "GA SBX",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d, margin);
+                    double [] ub = buildUb (problem, d, margin);
+                    return new GACore (problem, d, lb, ub);
+                });
+    }
+
     // === Compétiteurs auto-contenus ===
 
     public static CompetitorProject lmcma (Problem problem) throws InvalidProjectException
@@ -133,9 +275,19 @@ public class ProjectCatalog
         return new LMCMAProject (problem);
     }
 
+    public static CompetitorProject lmcma (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new LMCMAProject (problem, margin);
+    }
+
     public static CompetitorProject nbipop (Problem problem) throws InvalidProjectException
     {
         return new NBIPOPProject (problem);
+    }
+
+    public static CompetitorProject nbipop (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new NBIPOPProject (problem, margin);
     }
 
     public static CompetitorProject astarSeeds (Problem problem) throws InvalidProjectException
@@ -143,9 +295,19 @@ public class ProjectCatalog
         return new AStarSeedsProject (problem);
     }
 
+    public static CompetitorProject astarSeeds (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new AStarSeedsProject (problem, margin);
+    }
+
     public static CompetitorProject alConstraint (Problem problem) throws InvalidProjectException
     {
         return new ALConstraintProject (problem);
+    }
+
+    public static CompetitorProject alConstraint (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new ALConstraintProject (problem, margin);
     }
 
     public static CompetitorProject rfSurrogate (Problem problem) throws InvalidProjectException
@@ -153,9 +315,19 @@ public class ProjectCatalog
         return new RFSurrogateProject (problem);
     }
 
+    public static CompetitorProject rfSurrogate (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new RFSurrogateProject (problem, margin);
+    }
+
     public static CompetitorProject islands (Problem problem) throws InvalidProjectException
     {
         return new IslandProject (problem);
+    }
+
+    public static CompetitorProject islands (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new IslandProject (problem, margin);
     }
 
     // === Helpers ===
@@ -174,6 +346,29 @@ public class ProjectCatalog
         for (int i = 0; i < d; i++)
             ub [i] = (i % 2 == 0) ? p.getMaxX () : p.getMaxY ();
         return ub;
+    }
+
+    private static double [] buildLb (Problem p, int d, double margin)
+    {
+        double [] lb = new double [d];
+        for (int i = 0; i < d; i++)
+            lb [i] = (i % 2 == 0) ? (p.getMinX () - margin) : (p.getMinY () - margin);
+        return lb;
+    }
+
+    private static double [] buildUb (Problem p, int d, double margin)
+    {
+        double [] ub = new double [d];
+        for (int i = 0; i < d; i++)
+            ub [i] = (i % 2 == 0) ? (p.getMaxX () + margin) : (p.getMaxY () + margin);
+        return ub;
+    }
+
+    private static AlgorithmParameters paramsWithMargin (double margin)
+    {
+        AlgorithmParameters params = new AlgorithmParameters ();
+        params.setMargin (margin);
+        return params;
     }
 
     private static double [] buildInitMean (Problem p, int d)
