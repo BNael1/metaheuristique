@@ -29,7 +29,7 @@ public class BenchmarkExtendedBounds
     private static final double [] MARGINS = {0.0, 3.0, 5.0, 8.0};
 
     private static final String [] ALL_ALGOS =
-            {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "BipopAdaptif",
+            {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "L-SHADE", "BipopAdaptif",
              "LMCMA", "AStarSeeds", "NBIPOP", "ALConstraint", "RFSurrogate", "Islands",
              "GridBIPOP", "StochRank", "AStarRepair", "SepWarmup", "OptiPathFinal"};
 
@@ -312,6 +312,7 @@ public class BenchmarkExtendedBounds
             case "MultiSegment": return ProjectCatalog.ipop           (problem, margin); // meme encodage
             case "BIPOP":        return ProjectCatalog.bipop          (problem, margin);
             case "SHADE":        return ProjectCatalog.shade          (problem, margin);
+            case "L-SHADE":      return ProjectCatalog.lshade         (problem, margin);
             case "BipopAdaptif": return ProjectCatalog.adaptiveBipop  (problem, margin);
             case "LMCMA":        return ProjectCatalog.lmcma          (problem, margin);
             case "AStarSeeds":   return ProjectCatalog.astarSeeds     (problem, margin);

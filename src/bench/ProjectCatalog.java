@@ -3,6 +3,7 @@ package bench;
 import engine.cmaes.CMAESBuilder;
 import engine.de.DECore;
 import engine.de.DESHADECore;
+import engine.de.LSHADECore;
 import engine.ga.GACore;
 import engine.pso.PSOCore;
 import bezier.evaluation.Problem;
@@ -242,6 +243,30 @@ public class ProjectCatalog
                     double [] lb = buildLb (problem, d, margin);
                     double [] ub = buildUb (problem, d, margin);
                     return new DESHADECore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject lshade (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "L-SHADE",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    // Estimation : 300,000 evals en 60s
+                    return new LSHADECore (problem, d, lb, ub, 300_000);
+                });
+    }
+
+    public static OptimizerProject lshade (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "L-SHADE",
+                () -> {
+                    int d = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d, margin);
+                    double [] ub = buildUb (problem, d, margin);
+                    // Estimation : 300,000 evals en 60s
+                    return new LSHADECore (problem, d, lb, ub, 300_000);
                 });
     }
 
