@@ -1,4 +1,4 @@
-# Benchmark des variantes CMA-ES pour l'optimisation de courbes de Bézier
+﻿# Benchmark des variantes CMA-ES pour l'optimisation de courbes de Bézier
 
 ## Protocole expérimental
 
@@ -29,6 +29,8 @@
 | **AStarRepair**| 38.39  | 31.48  | 28.24  | 5848.11  |
 | **SepWarmup**  | 37.42  | 31.48  | 35.98  | 5468.24  |
 
+| **PSO**        | 37.43  | 31.49  | 45.12  | 2941.39  |
+
 > Les 6 variantes précédentes sont en *italique*, les 4 nouvelles idées en **gras**.
 
 ## Résultats — Meilleur score (min sur 3 runs, ou 1 run pour les 4 nouvelles idées)
@@ -51,6 +53,8 @@
 | **StochRank**  | 37.36  | 31.48  | 28.32  | 5439.37  |
 | **AStarRepair**| 38.39  | 31.48  | 28.24  | 5848.11  |
 | **SepWarmup**  | 37.42  | 31.48  | 35.98  | 5468.24  |
+
+| **PSO**        | 36.70  | 31.45  | 36.18  | 2079.72  |
 
 ## Classement par problème (score moyen, du meilleur au pire)
 
@@ -217,3 +221,26 @@ L'hypothèse est **confirmée** : étendre les bornes des points de contrôle am
 | prob4    | 4845,08 (3095,44)  | 3849,40 (2300,45)  | 2640,41 (1958,42)  | 2655,14 (1538,28)  |
 
 > Format : mean (best) — CSV source : `results/bench_ExtendedBounds.csv`
+
+---
+
+## Experience : PSO (Particle Swarm Optimization)
+
+### Protocole
+
+- **Algorithme** : PSO avec inertie decroissante lineaire (w : 0.9 -> 0.4), N = 10xd, c1 = c2 = 2.0
+- **Anti-stagnation** : reinitialisation de 50% des particules apres N x 10 generations sans amelioration
+- **Bornes** : bornes naturelles du probleme (sans marge), positions non clampes
+- **Budget** : 60 secondes par run (wall-clock)
+- **Repetitions** : 10 runs par probleme
+
+### Resultats - Score moyen (10 runs)
+
+| Probleme | PSO mean | PSO best | Reference CMAES | Reference BIPOP |
+|----------|----------|----------|-----------------|-----------------|
+| prob1    | 37.43    | 36.70    | 36.35           | 37.70           |
+| prob2    | 31.49    | 31.45    | 31.48           | 31.48           |
+| prob3    | 45.12    | 36.18    | 28.45           | 28.87           |
+| prob4    | 2941.39  | 2079.72  | 6026.86         | 4678.70         |
+
+> CSV source : `results/bench_PSO.csv`

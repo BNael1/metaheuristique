@@ -238,4 +238,5 @@ public class CMAESBuilder
                 .restart (new BIPOPRestart ())
                 .covariance (new SeparableWarmupCovariance (new StandardCovariance ()));
     }
+
 }

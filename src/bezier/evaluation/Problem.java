@@ -73,8 +73,10 @@ public final class Problem
 
     private Problem (String filename)
     {
-        String [] parts = filename.split ("/|\\.");
-        this.name = parts [parts.length - 2];
+        // Extraction portable du nom (fonctionne sur Windows et Linux)
+        String baseName = new File (filename).getName ();
+        int dot = baseName.lastIndexOf ('.');
+        this.name = (dot >= 0) ? baseName.substring (0, dot) : baseName;
         try (BufferedReader in = new BufferedReader (new FileReader (new File (filename))))
         {
             String line = in.readLine ();

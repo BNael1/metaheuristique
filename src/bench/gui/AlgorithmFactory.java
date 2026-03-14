@@ -5,6 +5,7 @@ import engine.cmaes.CMAESBuilder;
 import engine.de.DECore;
 import engine.de.DESHADECore;
 import engine.ga.GACore;
+import engine.pso.PSOCore;
 import bezier.evaluation.Problem;
 
 /**
@@ -51,6 +52,8 @@ public class AlgorithmFactory
                 return new GACore (problem, d, lb, ub);
             case "OptiPath Final":
                 return CMAESBuilder.full (problem).build ();
+            case "PSO":
+                return new PSOCore (problem, d, lb, ub);
             default:
                 throw new IllegalArgumentException ("Algorithme inconnu : " + algoName);
         }

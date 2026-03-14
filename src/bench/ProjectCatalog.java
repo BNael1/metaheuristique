@@ -4,6 +4,7 @@ import engine.cmaes.CMAESBuilder;
 import engine.de.DECore;
 import engine.de.DESHADECore;
 import engine.ga.GACore;
+import engine.pso.PSOCore;
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;
 import bezier.projects.InvalidProjectException;
@@ -265,6 +266,19 @@ public class ProjectCatalog
                     double [] lb = buildLb (problem, d, margin);
                     double [] ub = buildUb (problem, d, margin);
                     return new GACore (problem, d, lb, ub);
+                });
+    }
+
+    // === PSO ===
+
+    public static OptimizerProject pso (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "PSO",
+                () -> {
+                    int d        = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    return new PSOCore (problem, d, lb, ub);
                 });
     }
 
