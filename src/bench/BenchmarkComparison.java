@@ -37,7 +37,7 @@ public class BenchmarkComparison
     private static final String [] ALL_ALGOS =
             {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "BipopAdaptif",
              "LMCMA", "AStarSeeds", "NBIPOP", "ALConstraint", "RFSurrogate", "Islands",
-             "GridBIPOP", "StochRank", "AStarRepair", "SepWarmup", "OptiPathFinal", "PSO"};
+             "GridBIPOP", "StochRank", "AStarRepair", "SepWarmup", "OptiPathFinal", "PSO", "FPSO"};
 
     public static void main (String [] args) throws Exception
     {
@@ -267,6 +267,7 @@ public class BenchmarkComparison
             case "SepWarmup":    return ProjectCatalog.sepWarmup      (problem);
             case "OptiPathFinal":return ProjectCatalog.full           (problem);
             case "PSO":          return ProjectCatalog.pso            (problem);
+            case "FPSO":         return ProjectCatalog.fpso           (problem);
             default:             return ProjectCatalog.ipop           (problem);
         }
     }

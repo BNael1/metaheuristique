@@ -5,6 +5,8 @@ import engine.de.DECore;
 import engine.de.DESHADECore;
 import engine.de.LSHADECore;
 import engine.ga.GACore;
+import engine.pso.CLPSOCore;
+import engine.pso.FPSOCore;
 import engine.pso.PSOCore;
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;
@@ -304,6 +306,50 @@ public class ProjectCatalog
                     double [] lb = buildLb (problem, d);
                     double [] ub = buildUb (problem, d);
                     return new PSOCore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject clpso (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "CLPSO",
+                () -> {
+                    int d        = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    return new CLPSOCore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject clpso (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "CLPSO",
+                () -> {
+                    int d        = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d, margin);
+                    double [] ub = buildUb (problem, d, margin);
+                    return new CLPSOCore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject fpso (Problem problem) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "FPSO",
+                () -> {
+                    int d        = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d);
+                    double [] ub = buildUb (problem, d);
+                    return new FPSOCore (problem, d, lb, ub);
+                });
+    }
+
+    public static OptimizerProject fpso (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new OptimizerProject (problem, "FPSO",
+                () -> {
+                    int d        = 2 * problem.getNControlPoints ();
+                    double [] lb = buildLb (problem, d, margin);
+                    double [] ub = buildUb (problem, d, margin);
+                    return new FPSOCore (problem, d, lb, ub);
                 });
     }
 

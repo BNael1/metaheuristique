@@ -29,9 +29,9 @@ public class BenchmarkExtendedBounds
     private static final double [] MARGINS = {0.0, 3.0, 5.0, 8.0};
 
     private static final String [] ALL_ALGOS =
-            {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "L-SHADE", "BipopAdaptif",
+            {"CMAES", "DE", "GA", "MultiSegment", "BIPOP", "SHADE", "L-SHADE", "CLPSO", "BipopAdaptif",
              "LMCMA", "AStarSeeds", "NBIPOP", "ALConstraint", "RFSurrogate", "Islands",
-             "GridBIPOP", "StochRank", "AStarRepair", "SepWarmup", "OptiPathFinal"};
+             "GridBIPOP", "StochRank", "AStarRepair", "SepWarmup", "OptiPathFinal", "PSO", "FPSO"};
 
     public static void main (String [] args) throws Exception
     {
@@ -325,6 +325,7 @@ public class BenchmarkExtendedBounds
             case "AStarRepair":  return ProjectCatalog.surrogate      (problem, margin);
             case "SepWarmup":    return ProjectCatalog.sepWarmup      (problem, margin);
             case "OptiPathFinal":return ProjectCatalog.full           (problem, margin);
+            case "FPSO":         return ProjectCatalog.fpso           (problem, margin);
             default:              return ProjectCatalog.ipop           (problem, margin);
         }
     }
