@@ -17,6 +17,8 @@ import bench.competitors.astarseeds.AStarSeedsProject;
 import bench.competitors.alconst.ALConstraintProject;
 import bench.competitors.rfsurr.RFSurrogateProject;
 import bench.competitors.islands.IslandProject;
+import bezier.projects.competitor.gwo.GWOProject;
+import bezier.projects.competitor.firefly.FireflyProject;
 import engine.core.AlgorithmParameters;
 
 /**
@@ -413,6 +415,26 @@ public class ProjectCatalog
     public static CompetitorProject islands (Problem problem, double margin) throws InvalidProjectException
     {
         return new IslandProject (problem, margin);
+    }
+
+    public static CompetitorProject gwo (Problem problem) throws InvalidProjectException
+    {
+        return new GWOProject (problem);
+    }
+
+    public static CompetitorProject gwo (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new GWOProject (problem, margin);
+    }
+
+    public static CompetitorProject firefly (Problem problem) throws InvalidProjectException
+    {
+        return new FireflyProject (problem);
+    }
+
+    public static CompetitorProject firefly (Problem problem, double margin) throws InvalidProjectException
+    {
+        return new FireflyProject (problem, margin);
     }
 
     // === Helpers ===
