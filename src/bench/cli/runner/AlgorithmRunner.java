@@ -1,17 +1,13 @@
-package bench.gui;
+package bench.cli.runner;
 
 import engine.core.Optimizer;
 import engine.core.OptimizerState;
-import bench.OptimizerProject;
-
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Moteur d'exécution d'un Optimizer dans un thread séparé.
- *
- * Publie l'état (OptimizerState) à chaque génération via des listeners,
- * avec un throttle configurable pour ne pas saturer la GUI.
+ * Migré depuis bench.gui pour usage CLI.
  */
 public class AlgorithmRunner
 {
@@ -30,7 +26,7 @@ public class AlgorithmRunner
     private Thread thread;
     private long startTime;
 
-    // Throttle : notifier la GUI au maximum toutes les 50ms
+    // Throttle : notifier au maximum toutes les 50ms
     private static final long NOTIFY_INTERVAL_MS = 50;
 
     public AlgorithmRunner (String name, Optimizer optimizer, long timeLimitMs)
