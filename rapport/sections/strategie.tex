@@ -1,0 +1,57 @@
+% =============================================================================
+\section{Analyse stratégique et plan d'optimisation}
+\label{sec:strategie}
+% =============================================================================
+
+Au-delà de la simple comparaison de performance brute, nous avons mené une analyse stratégique pour sélectionner, justifier et optimiser les algorithmes retenus. Cette démarche vise à garantir non seulement la qualité des solutions, mais aussi la robustesse et l'efficacité de la recherche.
+
+\subsection{Critères de sélection multicritères}
+
+Pour évaluer la pertinence de chaque approche, nous avons défini quatre critères principaux :
+
+\begin{enumerate}
+    \item \textbf{Performance (Qualité de la solution)} : Mesurée par la valeur finale de la fonction de coût $f(\mathbf{x})$. C'est le critère prioritaire.
+    \item \textbf{Robustesse (Stabilité)} : Mesurée par l'écart-type des résultats sur plusieurs exécutions indépendantes. Un bon algorithme doit produire des résultats cohérents et reproductibles.
+    \item \textbf{Efficacité (Vitesse de convergence)} : Nombre d'évaluations nécessaires pour atteindre un seuil de qualité donné. Ce critère est crucial compte tenu du budget temps limité (60s).
+    \item \textbf{Passage à l'échelle (Scalabilité)} : Capacité de l'algorithme à maintenir ses performances lorsque la dimension du problème augmente (nombre de points de contrôle).
+\end{enumerate}
+
+\subsection{Justification du choix des algorithmes}
+
+Sur la base de ces critères et de l'état de l'art :
+
+\begin{itemize}
+    \item \textbf{CMA-ES} a été retenu comme candidat principal pour sa capacité inégalée à gérer les corrélations entre variables (via la matrice de covariance) et son adaptation automatique du pas de recherche ($\sigma$). C'est théoriquement le meilleur choix pour affiner des trajectoires lisses (courbes de Bézier) où les positions des points de contrôle sont fortement interdépendantes.
+    \item \textbf{DE (Differential Evolution)} a été choisi comme challenger pour sa simplicité et sa capacité d'exploration globale rapide. Son mécanisme de mutation différentielle lui permet de s'adapter à l'échelle du problème sans nécessiter d'apprentissage complexe d'une matrice de covariance.
+    \item \textbf{GA (Genetic Algorithm)} sert de "baseline" classique. Bien que souvent moins performant sur des problèmes purement continus que CMA-ES ou DE, il offre une grande flexibilité et permet de valider l'apport des opérateurs spécifiques aux domaines continus.
+\end{itemize}
+
+\subsection{Plan d'optimisation ciblée}
+
+Notre stratégie d'optimisation s'est déroulée en trois phases successives, avec des objectifs chiffrés pour chaque étape :
+
+\subsubsection{Phase 1 : Comparaison Baseline (Exploration)}
+\begin{itemize}
+    \item \textbf{Objectif} : Identifier l'algorithme le plus prometteur sur les instances simples (\texttt{prob1}, \texttt{prob2}).
+    \item \textbf{Indicateur} : Taux de succès (atteinte de l'optimum global connu ou supposé) de 100\% sur \texttt{prob2}.
+    \item \textbf{Résultat} : CMA-ES et DE montrent des performances équivalentes sur les cas simples, mais CMA-ES converge plus vite vers la précision machine.
+\end{itemize}
+
+\subsubsection{Phase 2 : Stratégies de Restart (Exploitation vs Exploration)}
+Pour surmonter les minima locaux (particulièrement critiques dans \texttt{prob3} et \texttt{prob4}), nous avons intégré des stratégies de redémarrage :
+\begin{itemize}
+    \item \textbf{IPOP-CMA-ES} : Augmentation de la taille de la population à chaque redémarrage (facteur 2). Cela permet d'élargir la recherche globale après avoir convergé localement.
+    \item \textbf{BIPOP-CMA-ES} : Alternance entre grandes populations (exploration globale) et petites populations (exploitation locale rapide) pour maximiser l'utilisation du budget d'évaluations restant.
+\end{itemize}
+
+\subsubsection{Phase 3 : Initialisation Intelligente (Seeding)}
+L'initialisation aléatoire est souvent inefficace dans des espaces contraints complexes (\texttt{prob4}). Nous avons testé une stratégie d'hybridation :
+\begin{itemize}
+    \item \textbf{A* Seeds} : Utilisation d'un chemin grossier trouvé par A* sur une grille pour positionner les points de contrôle initiaux.
+    \item \textbf{Impact attendu} : Réduction drastique du temps de recherche de la zone faisable, permettant à l'optimiseur de se concentrer sur le lissage et l'optimisation locale.
+\end{itemize}
+
+\subsection{Arrêt de la recherche et saturation}
+
+Nous avons observé un phénomène de saturation des performances sur l'instance \texttt{prob4}. Malgré l'augmentation du budget de calcul ou de la taille de population (IPOP), le gain marginal sur la fonction de coût devient négligeable au-delà d'un certain point. 
+L'analyse du "retour sur investissement" (amélioration du coût / temps de calcul supplémentaire) montre que l'effort doit se concentrer sur l'initialisation (trouver la bonne topologie de chemin) plutôt que sur le micro-ajustement des points de contrôle une fois dans un minimum local profond. Cela justifie l'arrêt de la recherche de variantes pures d'optimisation continue au profit d'approches hybrides (A* + CMA-ES).

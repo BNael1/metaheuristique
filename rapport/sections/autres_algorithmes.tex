@@ -1,0 +1,43 @@
+% =============================================================================
+\section{Variantes avancées et Compétiteurs}
+\label{sec:autres_algorithmes}
+% =============================================================================
+
+Afin de valider la robustesse de notre implémentation principale (CMA-ES et BIPOP), le banc de test inclut une comparaison exhaustive avec plusieurs variantes avancées et algorithmes hybrides. Cette section détaille les principes de fonctionnement de ces 14 méthodes supplémentaires.
+
+\subsection{Variantes Évolutionnaires Avancées}
+
+\paragraph{SHADE (Success-History based Parameter Adaptation for DE).}
+Une amélioration majeure de DE. Au lieu d'adapter les paramètres $F$ et $CR$ individuellement à chaque génération comme jDE, SHADE maintient une mémoire historique des valeurs ayant conduit à des améliorations de fitness. Les nouveaux paramètres sont échantillonnés à partir de cette mémoire, offrant une convergence très rapide et stable.
+
+\paragraph{Islands (Modèles Insulaires).}
+Cet algorithme distribue la population en plusieurs "îles" (sous-populations) qui évoluent de manière indépendante avec leurs propres paramètres d'exploration. Périodiquement, des individus migrent d'une île à l'autre. Cette approche retarde la convergence prématurée et préserve la diversité génétique.
+
+\paragraph{LMCMA (Limited Memory CMA-ES).}
+CMA-ES classique maintient une matrice de covariance complète, ce qui coûte $\mathcal{O}(d^2)$ en mémoire et $\mathcal{O}(d^3)$ en temps (pour la décomposition en valeurs propres). LMCMA utilise une approximation de rang faible (mise à jour de type BFGS) réduisant la complexité à $\mathcal{O}(d \log d)$. Il est conçu pour les problèmes à très haute dimension ($d > 1000$).
+
+\paragraph{RFSurrogate (Random Forest Surrogate).}
+L'évaluation de trajectoires peut être coûteuse. RFSurrogate utilise un modèle de substitution (Surrogate Model) basé sur des forêts aléatoires pour "pré-évaluer" les candidats. Seuls les individus jugés prometteurs par le modèle sont réellement évalués par la fonction de coût exacte, ce qui économise le budget d'évaluations.
+
+\subsection{Hybridation avec la Planification Discrète}
+
+Pour pallier la difficulté des métaheuristiques pures à trouver des passages dans des labyrinthes complexes (\texttt{prob4}), plusieurs approches hybrides ont été intégrées :
+
+\paragraph{AStarSeeds et AStarRepair.}
+Ces algorithmes discrétisent d'abord l'espace 2D en une grille de navigation.
+\begin{itemize}[nosep]
+    \item \textbf{AStarSeeds} : Utilise l'algorithme A* pour trouver un chemin discret sans collision. Les points de contrôle de la courbe de Bézier sont initialisés le long de ce chemin (seeding). L'optimiseur continu affine ensuite cette solution pour la lisser.
+    \item \textbf{AStarRepair} : Agit en cours d'optimisation. Si un individu généré traverse un obstacle, l'algorithme A* est appelé localement pour "réparer" le segment fautif en le contournant.
+\end{itemize}
+
+\subsection{Variantes de Gestion des Contraintes}
+
+La gestion des pénalités (collisions) modifie le paysage de fitness. Deux approches spécifiques sont évaluées :
+\begin{itemize}[nosep]
+    \item \textbf{ALConstraint (Augmented Lagrangian)} : Transforme le problème pénalisé en une suite de sous-problèmes sans contrainte. Les multiplicateurs de Lagrange associés aux obstacles sont mis à jour dynamiquement pour forcer le respect strict des zones interdites.
+    \item \textbf{StochRank (Stochastic Ranking)} : Lors du tri de la population, la fonction de coût et le niveau de violation des contraintes sont comparés avec une probabilité $P_f$ (souvent $0,45$). Cela permet à des individus légèrement infaisables mais très prometteurs en termes de coût de survivre, favorisant le contournement fluide des obstacles.
+\end{itemize}
+
+\subsection{Variantes Structurelles (MultiSegment)}
+
+Plutôt que d'optimiser une unique courbe de Bézier de degré élevé (qui souffre du phénomène de Runge et d'une influence globale de chaque point de contrôle), \textbf{MultiSegment} optimise une spline (succession de courbes de Bézier de faible degré, souvent cubiques) raccordées avec une continuité $C^1$ ou $C^2$. Bien que plus souple localement, cette approche augmente considérablement la dimensionnalité du problème.

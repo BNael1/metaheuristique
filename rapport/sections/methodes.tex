@@ -220,6 +220,29 @@ La covariance est mise à jour par une combinaison de rang 1 et rang $\mu$ :
 \end{equation}
 
 \emph{Discussion.}  C'est cette adaptation de $\mathbf{C}$ qui distingue
-fondamentalement CMA-ES de GA et DE : l'algorithme apprend la \emph{structure
-de corrélation} du paysage de fitness, ce qui lui permet de concentrer la
-recherche dans les directions les plus prometteuses.
+fondamentalement CMA-ES de GA et DE : l'algorithme apprend la \emph{structure de corrélation} du paysage de fitness, ce qui lui permet de concentrer la
+    recherche dans les directions les plus prometteuses.
+
+% ----- PSO -------------------------------------------------------------------
+\subsection{Optimisation par Essaim Particulaire (PSO)}
+\label{sec:pso}
+
+\subsubsection{Principe}
+L'Optimisation par Essaim Particulaire (PSO) s'inspire du comportement social des bancs de poissons ou des volées d'oiseaux. Chaque particule $i$ se déplace dans l'espace de recherche avec une vitesse $\mathbf{v}_i$ qui est mise à jour en fonction de sa propre meilleure expérience ($\mathbf{pbest}_i$) et de la meilleure expérience globale de l'essaim ($\mathbf{gbest}$).
+
+\subsubsection{Mise à jour de la vitesse et de la position}
+À chaque itération $t$, la vitesse et la position sont mises à jour selon :
+\begin{equation}
+    \mathbf{v}_i^{(t+1)} = w \cdot \mathbf{v}_i^{(t)} + c_1 r_1 (\mathbf{pbest}_i - \mathbf{x}_i^{(t)}) + c_2 r_2 (\mathbf{gbest} - \mathbf{x}_i^{(t)})
+\end{equation}
+\begin{equation}
+    \mathbf{x}_i^{(t+1)} = \mathbf{x}_i^{(t)} + \mathbf{v}_i^{(t+1)}
+\end{equation}
+où $w$ est le coefficient d'inertie, $c_1$ et $c_2$ sont les coefficients d'accélération (cognitif et social), et $r_1, r_2 \sim \mathcal{U}(0,1)$.
+
+\subsubsection{Gestion de l'inertie et stagnation}
+Pour favoriser l'exploration au début et l'exploitation à la fin, l'inertie $w$ décroît linéairement de $0{,}9$ à $0{,}4$ au cours des itérations.
+Un mécanisme d'anti-stagnation a été implémenté : si $\mathbf{gbest}$ ne s'améliore pas pendant un nombre donné de générations ($10 \times N$), 50\% des particules sont réinitialisées aléatoirement pour relancer l'exploration.
+
+\paragraph{Paramètres retenus.}
+Taille de l'essaim $N = 10d$, $c_1 = c_2 = 2{,}0$, $v_{\max} = 0{,}2 \times \text{range}$.

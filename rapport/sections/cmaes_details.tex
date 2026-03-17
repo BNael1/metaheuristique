@@ -62,29 +62,27 @@ par rapport au budget total de 60\,s (typiquement $>$300\,000 évaluations) et
 permet d'amortir considérablement le risque de convergence vers un mauvais
 optimum local.
 
-\subsection{Restarts IPOP}
-\label{sec:ipop}
+\subsection{Stratégies de Restart (IPOP et BIPOP)}
+\label{sec:ipop-bipop}
 
-Lorsque la convergence est détectée (écart de fitness dans la population
-$< 10^{-12}$, ou $\sigma$ effondré), l'algorithme effectue un \emph{restart}
-selon le schéma IPOP~\cite{auger2005} :
+Lorsque la convergence est détectée (écart de fitness dans la population $< 10^{-12}$, ou $\sigma$ effondré), l'algorithme effectue un \emph{restart}. Deux stratégies ont été implémentées :
+
+\paragraph{IPOP (Increasing Population Size).}
+La taille de population est doublée à chaque redémarrage ($\lambda_{new} = 2 \lambda_{old}$), plafonnée à 512. Cela permet d'explorer des bassins d'attraction de plus en plus larges.
+
+\paragraph{BIPOP (Bi-Population).}
+Cette variante alterne entre deux régimes pour maximiser l'efficacité du budget d'évaluations restant :
 \begin{itemize}[nosep]
-  \item la taille de population est doublée :
-        $\lambda \leftarrow 2\lambda$, plafonnée à 512 ;
-  \item le nouveau point de départ est choisi parmi trois stratégies, tirées
-        aléatoirement :
-  \begin{enumerate}[nosep]
-    \item[40\%] graine cachée + optimisation locale (500~évals),
-    \item[30\%] meilleur point trouvé + perturbation $\sigma_0/2$,
-    \item[30\%] meilleur parmi 8~candidats (4~aléatoires +
-                4~regroupements aux frontières).
-  \end{enumerate}
+    \item \textbf{Exploration (Large)} : Comme IPOP, on double la population pour sortir des bassins d'attraction locaux.
+    \item \textbf{Exploitation (Small)} : On utilise une petite population ($\lambda_0$) avec un pas de recherche réduit ($\sigma = \sigma_0 / 100$) pour converger rapidement vers des optima locaux potentiellement manqués.
 \end{itemize}
 
-\emph{Discussion.}  L'augmentation progressive de $\lambda$ permet d'explorer
-des bassins d'attraction de plus en plus larges à chaque restart, tout en
-conservant la capacité de convergence rapide des petites populations en début
-d'exécution.
+Le nouveau point de départ est choisi parmi trois stratégies :
+\begin{enumerate}[nosep]
+  \item[40\%] graine cachée + optimisation locale (500~évals),
+  \item[30\%] meilleur point trouvé + perturbation $\sigma_0/2$,
+  \item[30\%] meilleur parmi 8~candidats (4~aléatoires + 4~regroupements aux frontières).
+\end{enumerate}
 
 \subsection{Gestion des bornes}
 

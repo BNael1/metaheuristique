@@ -1,0 +1,43 @@
+% =============================================================================
+\section{État de l'art}
+\label{sec:etat_art}
+% =============================================================================
+
+La planification de trajectoire est un domaine vaste qui a donné lieu à de nombreuses approches, allant des méthodes déterministes classiques aux techniques d'intelligence artificielle modernes. Nous présentons ici un aperçu des principales familles d'algorithmes et justifions le choix des métaheuristiques pour notre problème spécifique.
+
+\subsection{Approches classiques et déterministes}
+
+Les méthodes classiques se divisent généralement en deux catégories : les approches discrètes et les approches basées sur le potentiel.
+
+\subsubsection{Planification sur grille et graphes}
+Les algorithmes de recherche sur graphe comme A* \cite{hart1968} ou Dijkstra sont très efficaces pour trouver le chemin le plus court dans un environnement discrétisé (grille ou graphe de visibilité). Cependant, ils présentent deux inconvénients majeurs pour notre application :
+\begin{itemize}
+    \item \textbf{Discrétisation} : La trajectoire résultante est une succession de segments linéaires, ce qui ne garantit pas la fluidité (continuité $C^1$ ou $C^2$) requise pour des mouvements réalistes.
+    \item \textbf{Explosion combinatoire} : La complexité augmente exponentiellement avec la dimension de l'espace de recherche (nombre de degrés de liberté).
+\end{itemize}
+Des variantes comme RRT (Rapidly-exploring Random Trees) ou PRM (Probabilistic Roadmaps) permettent de traiter des espaces de configuration continus, mais produisent souvent des chemins sous-optimaux et non lisses nécessitant une étape de post-traitement.
+
+\subsubsection{Champs de potentiel artificiels}
+La méthode des champs de potentiel (Artificial Potential Fields - APF) \cite{khatib1986} considère le robot comme une particule se déplaçant dans un champ de forces : une force attractive vers la cible et des forces répulsives générées par les obstacles. Bien que très rapide et adaptée au temps réel, cette méthode souffre du problème des \textbf{minima locaux}, où le robot peut rester coincé dans une configuration d'équilibre hors de la cible.
+
+\subsection{Optimisation continue et métaheuristiques}
+
+Lorsque la trajectoire est paramétrisée par une fonction continue (comme les splines ou les courbes de Bézier), le problème de planification devient un problème d'optimisation numérique : trouver les paramètres $\mathbf{x}$ qui minimisent une fonction de coût $f(\mathbf{x})$.
+
+\subsubsection{Méthodes basées sur le gradient}
+Les méthodes de descente de gradient (Newton, Quasi-Newton/BFGS) sont très efficaces pour l'optimisation locale de fonctions lisses et dérivables. Cependant, notre fonction de coût (Section \ref{sec:cost}) présente plusieurs défis :
+\begin{itemize}
+    \item \textbf{Non-convexité} : La présence d'obstacles crée de multiples optima locaux.
+    \item \textbf{Non-dérivabilité} : Les pénalités de collision et de sortie de zone peuvent introduire des discontinuités ou des zones non-différentiables, rendant le calcul du gradient instable ou impossible.
+\end{itemize}
+
+\subsubsection{Métaheuristiques à population}
+Pour surmonter ces limitations, les métaheuristiques à population (Evolutionary Algorithms - EA) se sont imposées comme une alternative robuste. Elles n'exigent pas le calcul du gradient (méthodes "black-box") et explorent l'espace de recherche de manière globale, réduisant le risque de piégeage dans des minima locaux.
+\begin{itemize}
+    \item \textbf{Algorithmes Génétiques (GA)} : Inspirés de l'évolution naturelle, ils sont très flexibles mais peuvent converger lentement sur des problèmes continus sans opérateurs spécifiques (comme le croisement SBX).
+    \item \textbf{Évolution Différentielle (DE)} : Particulièrement adaptée à l'optimisation continue, DE utilise les différences vectorielles pour guider la recherche. Elle est réputée pour sa simplicité et son efficacité, mais dépend fortement du réglage de ses paramètres ($F$ et $CR$).
+    \item \textbf{CMA-ES (Covariance Matrix Adaptation Evolution Strategy)} : Considéré comme l'état de l'art pour l'optimisation continue en boîte noire \cite{hansen2001}, CMA-ES adapte dynamiquement la distribution de recherche (matrice de covariance) pour capturer la topologie de la fonction de coût, gérant efficacement les problèmes mal conditionnés et non séparables.
+\end{itemize}
+
+\subsection{Synthèse}
+Compte tenu de la nature continue, multimodale et non-linéaire de notre problème d'optimisation de courbes de Bézier, les métaheuristiques, et en particulier les stratégies d'évolution comme CMA-ES, apparaissent comme les candidats les plus prometteurs pour obtenir des trajectoires optimales et fluides.

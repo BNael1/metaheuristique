@@ -1,0 +1,26 @@
+% =============================================================================
+\section*{Synthèse Exécutive}
+\addcontentsline{toc}{section}{Synthèse Exécutive}
+% =============================================================================
+
+Ce projet a exploré l'application de métaheuristiques avancées pour l'optimisation de trajectoires 2D modélisées par des courbes de Bézier en présence d'obstacles. L'objectif était de minimiser une fonction de coût composite incluant la longueur du chemin, les collisions et la courbure, sous contrainte de temps (60 secondes).
+
+\paragraph{Méthodologie.}
+Nous avons implémenté et comparé cinq algorithmes majeurs :
+\begin{itemize}
+    \item \textbf{CMA-ES} (Covariance Matrix Adaptation Evolution Strategy) et sa variante à redémarrage \textbf{BIPOP-CMA-ES}.
+    \item \textbf{DE} (Differential Evolution) avec auto-adaptation jDE.
+    \item \textbf{GA} (Genetic Algorithm) avec croisement SBX.
+    \item \textbf{PSO} (Particle Swarm Optimization) avec mécanisme anti-stagnation.
+\end{itemize}
+
+\paragraph{Résultats Clés.}
+L'analyse expérimentale sur quatre instances de difficulté croissante révèle que :
+\begin{enumerate}
+    \item \textbf{CMA-ES est l'algorithme le plus performant et le plus stable} pour la majorité des problèmes (prob1, prob2, prob3), atteignant des scores quasi-optimaux avec une précision élevée. Sa capacité à modéliser les corrélations entre points de contrôle est un atout décisif pour la fluidité des courbes.
+    \item \textbf{PSO crée la surprise sur les problèmes complexes} (prob4), surperformant tous les autres algorithmes d'un facteur 2 (score de 2\,941 contre >5\,000). Sa dynamique d'essaim lui permet de découvrir des topologies de chemin radicalement différentes que les méthodes basées sur la distribution normale (CMA-ES) peinent à trouver sans initialisation spécifique.
+    \item \textbf{Les stratégies de Restart (BIPOP)} sont indispensables pour la robustesse, permettant à CMA-ES de rattraper une partie de son retard sur prob4 (score amélioré de 6\,026 à 4\,678).
+\end{enumerate}
+
+\paragraph{Recommandation.}
+Pour une application industrielle, nous recommandons une \textbf{approche hybride} : utiliser une phase exploratoire rapide avec PSO ou un algorithme de recherche de chemin discret (A*) pour identifier la topologie approximative, suivie d'une phase d'intensification avec CMA-ES pour le lissage et l'optimisation fine de la trajectoire.
