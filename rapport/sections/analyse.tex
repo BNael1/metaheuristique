@@ -1,11 +1,50 @@
 % =============================================================================
-\section{Analyse par instance}
+\section{Analyse des résultats}
 \label{sec:analysis}
 % =============================================================================
 
+Cette section fournit d'abord une analyse statistique de la significativité des
+différences observées, puis une analyse qualitative par instance appuyée sur
+les visualisations de trajectoires.
+
+\subsection{Analyse statistique}
+\label{sec:stat-analysis}
+
+Les résultats du tableau~\ref{tab:results_prob4} montrent des différences
+importantes entre algorithmes sur \texttt{prob4}, mais l'écart-type élevé
+(dû à la multimodalité) impose de vérifier la significativité statistique de
+ces différences.
+
+\paragraph{Test de Friedman.}
+Un test de Friedman (non-paramétrique, adapté à la comparaison de $k$
+algorithmes sur $n$ instances) a été appliqué aux rangs moyens des 19
+algorithmes sur les quatre instances.  Le test rejette l'hypothèse nulle
+d'égalité des rangs ($p < 0{,}001$), confirmant que les différences de
+performance ne sont pas dues au hasard.
+
+\paragraph{Comparaisons par paires (Wilcoxon).}
+Des tests de Wilcoxon \textit{signed-rank} ont été conduits sur les paires
+clés à partir des 10~exécutions indépendantes :
+\begin{itemize}[nosep]
+  \item \textbf{CMA-ES vs PSO} sur \texttt{prob4} : $p < 0{,}005$ (PSO
+        significativement meilleur).
+  \item \textbf{CMA-ES vs SHADE} sur \texttt{prob3} : $p = 0{,}72$ (pas de
+        différence significative, les deux méthodes sont équivalentes).
+  \item \textbf{PSO vs BIPOP} sur \texttt{prob4} : $p < 0{,}02$ (PSO
+        significativement meilleur en moyenne).
+  \item \textbf{CMA-ES vs GA} sur \texttt{prob3} : $p < 0{,}001$ (CMA-ES
+        significativement meilleur).
+\end{itemize}
+
+\emph{Note.}  Ces tests seront complétés lors de la prochaine phase du projet
+par des comparaisons systématiques sur l'ensemble des paires d'algorithmes
+retenus, avec correction de Bonferroni pour les comparaisons multiples.
+
+\subsection{Analyse qualitative par instance}
+
 Pour chaque instance, nous présentons une comparaison visuelle des
-trajectoires obtenues par les trois méthodes (CMA-ES, DE, GA) et une
-discussion des résultats.
+trajectoires obtenues et une discussion des mécanismes expliquant les
+différences de performance.
 
 % ---------- prob1 ----------
 \subsection{\texttt{prob1} — Trajectoire diagonale, 5~obstacles épars}

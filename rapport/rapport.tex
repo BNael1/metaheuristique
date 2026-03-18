@@ -86,17 +86,18 @@
 \pagenumbering{roman}
 
 \begin{abstract}
-Ce rapport présente l'étude, l'implémentation et la comparaison de trois
-métaheuristiques à population --- algorithme génétique (GA), évolution
-différentielle (DE) et stratégie évolutionnaire à adaptation de la matrice de
-covariance (CMA-ES) --- pour l'optimisation de trajectoires 2D modélisées par
-des courbes de Bézier en présence d'obstacles. Après une analyse du problème
-et de sa fonction de coût composite, nous détaillons le fonctionnement de
-chaque algorithme, les choix d'implémentation et les améliorations apportées
-(seeding avancé, restarts IPOP). Une campagne expérimentale sur quatre
-instances de difficulté croissante montre la supériorité de CMA-ES sur trois
-des quatre problèmes et met en lumière les limites intrinsèques de la
-représentation par courbes de Bézier de degré fixe.
+Ce rapport présente l'étude comparative de métaheuristiques à population pour
+l'optimisation de trajectoires 2D modélisées par des courbes de Bézier en
+présence d'obstacles.  Nous implémentons et évaluons 19~algorithmes et
+variantes couvrant quatre familles (GA, DE/SHADE, CMA-ES/BIPOP, PSO) sur
+quatre instances de difficulté croissante, avec un budget de 60~secondes.
+L'analyse expérimentale révèle la complémentarité des approches : CMA-ES
+domine sur les problèmes corrélés grâce à l'adaptation de la covariance, tandis
+que PSO surpasse toutes les méthodes d'un facteur~2 sur l'instance
+labyrinthique.  L'extension des bornes du domaine des points de contrôle réduit
+le coût de 45\,\% sur le problème le plus difficile.  Ces résultats orientent la
+sélection vers trois familles complémentaires pour la phase d'optimisation
+fine.
 \end{abstract}
 \thispagestyle{empty}
 \newpage
@@ -121,17 +122,5 @@ représentation par courbes de Bézier de degré fixe.
 \input{sections/strategie}
 \input{sections/conclusion}
 \input{sections/references}
-
-% =============================================================================
-% Légende commune figures
-% =============================================================================
-\vspace{0.5cm}
-\noindent
-\textbf{Légende commune des figures~\ref{fig:prob1} à~\ref{fig:prob4} :}
-trajectoire (trait épais coloré : bleu = CMA-ES, orange = DE, vert = GA) ;
-carrés rouges = points de contrôle internes ;
-losanges verts = départ et arrivée ;
-cercles rouge foncé = noyau dur des obstacles ($r$) ;
-auréoles orange = zone de pénalité douce ($r < d < r+1$).
 
 \end{document}

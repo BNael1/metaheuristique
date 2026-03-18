@@ -15,10 +15,15 @@ Les algorithmes de recherche sur graphe comme A* \cite{hart1968} ou Dijkstra son
     \item \textbf{Discrétisation} : La trajectoire résultante est une succession de segments linéaires, ce qui ne garantit pas la fluidité (continuité $C^1$ ou $C^2$) requise pour des mouvements réalistes.
     \item \textbf{Explosion combinatoire} : La complexité augmente exponentiellement avec la dimension de l'espace de recherche (nombre de degrés de liberté).
 \end{itemize}
-Des variantes comme RRT (Rapidly-exploring Random Trees) ou PRM (Probabilistic Roadmaps) permettent de traiter des espaces de configuration continus, mais produisent souvent des chemins sous-optimaux et non lisses nécessitant une étape de post-traitement.
+Des variantes comme les RRT (\textit{Rapidly-exploring Random
+Trees})~\cite{lavalle1998} ou les PRM (\textit{Probabilistic Roadmaps})
+permettent de traiter des espaces de configuration continus, mais produisent
+souvent des chemins sous-optimaux et non lisses nécessitant une étape de
+post-traitement.
 
 \subsubsection{Champs de potentiel artificiels}
-La méthode des champs de potentiel (Artificial Potential Fields - APF) \cite{khatib1986} considère le robot comme une particule se déplaçant dans un champ de forces : une force attractive vers la cible et des forces répulsives générées par les obstacles. Bien que très rapide et adaptée au temps réel, cette méthode souffre du problème des \textbf{minima locaux}, où le robot peut rester coincé dans une configuration d'équilibre hors de la cible.
+La méthode des champs de potentiel (Artificial Potential Fields - APF) \cite{khatib1986} considère le robot comme une particule se déplaçant dans un champ de forces : une force attractive vers la cible et des forces répulsives générées par les obstacles. Bien que très rapide et adaptée au temps réel, cette méthode souffre du problème des \textbf{minima locaux}, où le robot peut
+rester bloqué dans une configuration d'équilibre hors de la cible.
 
 \subsection{Optimisation continue et métaheuristiques}
 
@@ -39,5 +44,24 @@ Pour surmonter ces limitations, les métaheuristiques à population (Evolutionar
     \item \textbf{CMA-ES (Covariance Matrix Adaptation Evolution Strategy)} : Considéré comme l'état de l'art pour l'optimisation continue en boîte noire \cite{hansen2001}, CMA-ES adapte dynamiquement la distribution de recherche (matrice de covariance) pour capturer la topologie de la fonction de coût, gérant efficacement les problèmes mal conditionnés et non séparables.
 \end{itemize}
 
-\subsection{Synthèse}
-Compte tenu de la nature continue, multimodale et non-linéaire de notre problème d'optimisation de courbes de Bézier, les métaheuristiques, et en particulier les stratégies d'évolution comme CMA-ES, apparaissent comme les candidats les plus prometteurs pour obtenir des trajectoires optimales et fluides.
+\subsection{Approches par courbes paramétriques}
+
+Lorsque la trajectoire est représentée par une courbe paramétrique (B-splines,
+NURBS, courbes de Bézier), l'optimisation porte sur les points de contrôle.
+Cette représentation garantit la régularité ($C^1$ ou $C^2$) par construction,
+mais introduit une difficulté propre : l'influence globale de chaque point de
+contrôle sur la courbe et la non-séparabilité du problème d'optimisation qui en
+résulte.  Les métaheuristiques capables de modéliser les corrélations entre
+variables, comme CMA-ES, sont donc particulièrement adaptées à ce cadre.
+
+\subsection{Synthèse et positionnement}
+
+Compte tenu de la nature continue, multimodale et non-linéaire de notre
+problème d'optimisation de courbes de Bézier, les métaheuristiques, et en
+particulier les stratégies d'évolution comme CMA-ES, apparaissent comme les
+candidats les plus prometteurs.  Notre contribution se situe à l'intersection
+de ces approches : nous comparons systématiquement trois familles de
+métaheuristiques (stratégies d'évolution, évolution différentielle, essaims
+particulaires) sur un problème de trajectoire par courbes de Bézier, et nous
+évaluons l'apport de mécanismes avancés (\textit{seeding}, \textit{restarts},
+bornes étendues, hybridation avec A*) dans un cadre expérimental contrôlé.

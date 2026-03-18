@@ -23,7 +23,7 @@ pour éviter un coût $O(d^3)$ à chaque génération.
 L'initialisation joue un rôle déterminant lorsque le budget est limité à
 60~s.  Plutôt que de démarrer CMA-ES depuis un unique point initial (par
 exemple l'interpolation linéaire départ--arrivée), nous générons un ensemble
-diversifié de \textbf{graines candidates} puis sélectionnons la meilleure
+diversifié de \textbf{graines candidates} (\textit{seeds}) puis sélectionnons la meilleure
 pour initialiser $\mathbf{m}^{(0)}$.
 
 \subsubsection{Catégories de graines}
@@ -65,12 +65,24 @@ optimum local.
 \subsection{Stratégies de Restart (IPOP et BIPOP)}
 \label{sec:ipop-bipop}
 
-Lorsque la convergence est détectée (écart de fitness dans la population $< 10^{-12}$, ou $\sigma$ effondré), l'algorithme effectue un \emph{restart}. Deux stratégies ont été implémentées :
+Lorsque la convergence est détectée, l'algorithme effectue un \textit{restart}.
+Trois critères d'arrêt sont vérifiés à chaque génération :
+\begin{enumerate}[nosep]
+  \item \textbf{Stagnation de la \textit{fitness}} : l'écart entre le meilleur
+        et le pire individu est inférieur à $10^{-12}$, seuil choisi proche de
+        la précision machine double ($\approx 2{,}2 \times 10^{-16}$) ;
+  \item \textbf{Effondrement de $\sigma$} : $\sigma < 10^{-16}$, indiquant
+        que le pas de recherche est trop petit pour progresser ;
+  \item \textbf{Dégénérescence de $\mathbf{C}$} : le rapport
+        $\lambda_{\max}/\lambda_{\min}$ des valeurs propres de $\mathbf{C}$
+        dépasse $10^{14}$, signalant un conditionnement numérique pathologique.
+\end{enumerate}
+Deux stratégies de \textit{restart} ont été implémentées :
 
 \paragraph{IPOP (Increasing Population Size).}
 La taille de population est doublée à chaque redémarrage ($\lambda_{new} = 2 \lambda_{old}$), plafonnée à 512. Cela permet d'explorer des bassins d'attraction de plus en plus larges.
 
-\paragraph{BIPOP (Bi-Population).}
+\paragraph{BIPOP (Bi-Population)~\cite{hansen2009}.}
 Cette variante alterne entre deux régimes pour maximiser l'efficacité du budget d'évaluations restant :
 \begin{itemize}[nosep]
     \item \textbf{Exploration (Large)} : Comme IPOP, on double la population pour sortir des bassins d'attraction locaux.

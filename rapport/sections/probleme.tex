@@ -95,10 +95,15 @@ Nombre de points hors du domaine :
 $P_{\text{bord}} = \#\{k : \mathbf{q}_k \notin
 [x_{\min}, x_{\max}] \times [y_{\min}, y_{\max}]\}$.
 
-\emph{Discussion.}  Les pondérations $\alpha = \gamma = 100$ rendent les
-collisions et les sorties de zone cent fois plus coûteuses par unité que la
-longueur.  La courbure ($\beta = 1$) agit comme un régularisateur léger qui
-favorise la fluidité sans dominer les autres termes.
+\emph{Discussion.}  Les pondérations $\alpha = \gamma = 100$ et $\beta = 1$
+sont imposées par le cadre du projet (API \texttt{Problem} fournie par
+l'enseignant).  Elles rendent les collisions et les sorties de zone cent fois
+plus coûteuses par unité que la longueur, assurant que la faisabilité
+(absence de collision) prime sur l'optimalité (longueur minimale).  La courbure
+($\beta = 1$) agit comme un régularisateur léger favorisant la fluidité sans
+dominer les autres termes.  Ce choix de hiérarchie est cohérent avec les
+recommandations de la littérature sur les méthodes de pénalité
+extérieure~\cite{coello2002}.
 
 \subsection{Description des instances}
 \label{sec:instances}

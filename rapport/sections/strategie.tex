@@ -1,57 +1,92 @@
 % =============================================================================
-\section{Analyse stratégique et plan d'optimisation}
+\section{Sélection des méthodes et plan d'optimisation}
 \label{sec:strategie}
 % =============================================================================
 
-Au-delà de la simple comparaison de performance brute, nous avons mené une analyse stratégique pour sélectionner, justifier et optimiser les algorithmes retenus. Cette démarche vise à garantir non seulement la qualité des solutions, mais aussi la robustesse et l'efficacité de la recherche.
+L'exploration systématique de 19~algorithmes (section~\ref{sec:autres_algorithmes})
+a permis d'identifier les forces et faiblesses de chaque approche.  Cette
+section formalise les critères de sélection et propose un plan d'optimisation
+pour la phase suivante du projet.
 
-\subsection{Critères de sélection multicritères}
+\subsection{Critères de sélection}
 
-Pour évaluer la pertinence de chaque approche, nous avons défini quatre critères principaux :
+Quatre critères ont guidé la sélection des méthodes à retenir :
 
-\begin{enumerate}
-    \item \textbf{Performance (Qualité de la solution)} : Mesurée par la valeur finale de la fonction de coût $f(\mathbf{x})$. C'est le critère prioritaire.
-    \item \textbf{Robustesse (Stabilité)} : Mesurée par l'écart-type des résultats sur plusieurs exécutions indépendantes. Un bon algorithme doit produire des résultats cohérents et reproductibles.
-    \item \textbf{Efficacité (Vitesse de convergence)} : Nombre d'évaluations nécessaires pour atteindre un seuil de qualité donné. Ce critère est crucial compte tenu du budget temps limité (60s).
-    \item \textbf{Passage à l'échelle (Scalabilité)} : Capacité de l'algorithme à maintenir ses performances lorsque la dimension du problème augmente (nombre de points de contrôle).
+\begin{enumerate}[nosep]
+  \item \textbf{Performance} : valeur finale de $f(\mathbf{x})$ — critère
+        prioritaire.
+  \item \textbf{Robustesse} : écart-type sur 10~exécutions indépendantes.
+        Un algorithme est considéré robuste si $\sigma / \bar{f} < 5\,\%$ sur
+        \texttt{prob1}--\texttt{prob3}.
+  \item \textbf{Complémentarité} : capacité à exceller sur des types
+        d'instances différents, permettant une couverture globale du spectre
+        de difficulté.
+  \item \textbf{Potentiel d'amélioration} : existence de variantes ou de
+        mécanismes d'hybridation susceptibles d'améliorer encore les
+        performances (bornes étendues, \textit{restarts}, initialisation
+        intelligente).
 \end{enumerate}
 
-\subsection{Justification du choix des algorithmes}
+\subsection{Méthodes retenues}
 
-Sur la base de ces critères et de l'état de l'art :
+Sur la base de ces critères, trois familles sont sélectionnées :
 
-\begin{itemize}
-    \item \textbf{CMA-ES} a été retenu comme candidat principal pour sa capacité inégalée à gérer les corrélations entre variables (via la matrice de covariance) et son adaptation automatique du pas de recherche ($\sigma$). C'est théoriquement le meilleur choix pour affiner des trajectoires lisses (courbes de Bézier) où les positions des points de contrôle sont fortement interdépendantes.
-    \item \textbf{DE (Differential Evolution)} a été choisi comme challenger pour sa simplicité et sa capacité d'exploration globale rapide. Son mécanisme de mutation différentielle lui permet de s'adapter à l'échelle du problème sans nécessiter d'apprentissage complexe d'une matrice de covariance.
-    \item \textbf{GA (Genetic Algorithm)} sert de "baseline" classique. Bien que souvent moins performant sur des problèmes purement continus que CMA-ES ou DE, il offre une grande flexibilité et permet de valider l'apport des opérateurs spécifiques aux domaines continus.
+\paragraph{CMA-ES / BIPOP (instances corrélées).}
+CMA-ES atteint les meilleurs scores sur \texttt{prob1} ($36{,}35$) et
+\texttt{prob3} ($28{,}45$) avec une variance quasi nulle.  L'adaptation de la
+matrice de covariance est un avantage décisif sur les problèmes non-séparables.
+La variante BIPOP~\cite{hansen2009} ajoute la robustesse des \textit{restarts}
+à double régime (exploration/exploitation), et les bornes étendues
+(section~\ref{sec:cmaes-details}) offrent un potentiel de réduction de 45\,\%
+sur \texttt{prob4}.
+
+\paragraph{PSO (instances multimodales).}
+PSO surpasse toutes les autres méthodes sur \texttt{prob4} ($2\,941$ vs
+$4\,669$ pour StochRank, $p < 0{,}005$).  Sa dynamique d'essaim
+(mémoire cinétique, absence de modèle gaussien) lui permet de traverser des
+bassins d'attraction étroits que CMA-ES ne peut explorer qu'avec un
+\textit{seeding} spécifique.
+
+\paragraph{DE / SHADE (compromis robuste).}
+SHADE égale CMA-ES sur \texttt{prob3} ($28{,}45 \pm 0{,}31$, $p = 0{,}72$
+au test de Wilcoxon) et offre une convergence rapide grâce à l'adaptation
+historique de $F$ et $CR$.  Sa simplicité d'implémentation et son
+auto-adaptation en font un candidat naturel pour l'hybridation.
+
+\subsection{Méthodes écartées et justification}
+
+\begin{itemize}[nosep]
+  \item \textbf{GA} : dominé par CMA-ES et DE sur toutes les instances ; le
+        croisement SBX ne capture pas les corrélations.
+  \item \textbf{GWO, FA, CLPSO, FPSO} : performances inférieures ou
+        équivalentes à PSO standard, sans mécanisme distinctif.
+  \item \textbf{LMCMA} : instable ($\sigma = 23{,}5$ sur \texttt{prob3}) ;
+        conçu pour $d > 1000$, inadapté à nos dimensions ($d \leq 32$).
+  \item \textbf{Islands, GridBIPOP} : surcoût de gestion sans gain
+        significatif.
+  \item \textbf{MultiSegment} : augmente la dimensionnalité sans bénéfice
+        (résultat aberrant sur \texttt{prob2}).
 \end{itemize}
 
-\subsection{Plan d'optimisation ciblée}
+\subsection{Plan d'optimisation pour la phase suivante}
 
-Notre stratégie d'optimisation s'est déroulée en trois phases successives, avec des objectifs chiffrés pour chaque étape :
+La prochaine étape du projet visera l'optimisation fine des trois méthodes
+retenues selon trois axes :
 
-\subsubsection{Phase 1 : Comparaison Baseline (Exploration)}
-\begin{itemize}
-    \item \textbf{Objectif} : Identifier l'algorithme le plus prometteur sur les instances simples (\texttt{prob1}, \texttt{prob2}).
-    \item \textbf{Indicateur} : Taux de succès (atteinte de l'optimum global connu ou supposé) de 100\% sur \texttt{prob2}.
-    \item \textbf{Résultat} : CMA-ES et DE montrent des performances équivalentes sur les cas simples, mais CMA-ES converge plus vite vers la précision machine.
-\end{itemize}
+\subsubsection{Axe 1 : Hybridation PSO $\to$ CMA-ES}
+Utiliser PSO en phase d'exploration rapide (découverte de la topologie du
+chemin sur \texttt{prob4}), puis basculer vers CMA-ES pour le raffinement de la
+trajectoire.  Le critère de bascule sera défini par un seuil de stagnation
+de PSO ou un pourcentage du budget temporel (par exemple, 30\,\% PSO + 70\,\%
+CMA-ES).
 
-\subsubsection{Phase 2 : Stratégies de Restart (Exploitation vs Exploration)}
-Pour surmonter les minima locaux (particulièrement critiques dans \texttt{prob3} et \texttt{prob4}), nous avons intégré des stratégies de redémarrage :
-\begin{itemize}
-    \item \textbf{IPOP-CMA-ES} : Augmentation de la taille de la population à chaque redémarrage (facteur 2). Cela permet d'élargir la recherche globale après avoir convergé localement.
-    \item \textbf{BIPOP-CMA-ES} : Alternance entre grandes populations (exploration globale) et petites populations (exploitation locale rapide) pour maximiser l'utilisation du budget d'évaluations restant.
-\end{itemize}
+\subsubsection{Axe 2 : Réglage fin des bornes étendues}
+Les résultats préliminaires (marge 5--8 unités) montrent un optimum autour de
+$\text{margin} = 5$.  Une recherche systématique sur $\text{margin} \in
+\{3, 4, 5, 6, 7, 8, 10\}$ sera conduite avec 10~exécutions par configuration
+pour identifier la valeur optimale avec significativité statistique.
 
-\subsubsection{Phase 3 : Initialisation Intelligente (Seeding)}
-L'initialisation aléatoire est souvent inefficace dans des espaces contraints complexes (\texttt{prob4}). Nous avons testé une stratégie d'hybridation :
-\begin{itemize}
-    \item \textbf{A* Seeds} : Utilisation d'un chemin grossier trouvé par A* sur une grille pour positionner les points de contrôle initiaux.
-    \item \textbf{Impact attendu} : Réduction drastique du temps de recherche de la zone faisable, permettant à l'optimiseur de se concentrer sur le lissage et l'optimisation locale.
-\end{itemize}
-
-\subsection{Arrêt de la recherche et saturation}
-
-Nous avons observé un phénomène de saturation des performances sur l'instance \texttt{prob4}. Malgré l'augmentation du budget de calcul ou de la taille de population (IPOP), le gain marginal sur la fonction de coût devient négligeable au-delà d'un certain point. 
-L'analyse du "retour sur investissement" (amélioration du coût / temps de calcul supplémentaire) montre que l'effort doit se concentrer sur l'initialisation (trouver la bonne topologie de chemin) plutôt que sur le micro-ajustement des points de contrôle une fois dans un minimum local profond. Cela justifie l'arrêt de la recherche de variantes pures d'optimisation continue au profit d'approches hybrides (A* + CMA-ES).
+\subsubsection{Axe 3 : Benchmark statistique rigoureux}
+Les variantes finales seront évaluées sur 30~exécutions indépendantes (au lieu
+de 10) avec des tests de Friedman et Wilcoxon corrigés par Bonferroni, afin de
+produire des conclusions statistiquement robustes pour le rapport final.

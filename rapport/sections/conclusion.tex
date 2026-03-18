@@ -3,26 +3,56 @@
 \label{sec:conclusion}
 % =============================================================================
 
-\subsection{Synthèse}
+\subsection{Bilan}
 
-Nous avons implémenté et comparé trois métaheuristiques (GA, DE, CMA-ES) pour
-l'optimisation de trajectoires par courbes de Bézier.  CMA-ES (variante
-IPOP avec seeding avancé) s'est imposé comme la meilleure méthode, atteignant
-des scores reproductibles et de haute qualité sur trois instances sur quatre.
-L'instance \texttt{prob4}, malgré des résultats significativement supérieurs
-aux autres méthodes et aux solutions aléatoires, reste un défi en raison des
-limites de la représentation par courbe de Bézier unique de degré fixe.
+Nous avons implémenté et comparé 19~algorithmes et variantes de
+métaheuristiques pour l'optimisation de trajectoires par courbes de Bézier sur
+quatre instances de difficulté croissante.  Cette exploration systématique a
+permis d'identifier trois familles complémentaires :
+\begin{itemize}[nosep]
+  \item \textbf{CMA-ES / BIPOP} : méthode la plus performante et la plus
+        stable sur les instances corrélées (\texttt{prob1}--\texttt{prob3}),
+        grâce à l'adaptation de la matrice de covariance ;
+  \item \textbf{PSO} : seule méthode atteignant des scores inférieurs à
+        3\,000 sur l'instance labyrinthique \texttt{prob4}, grâce à sa dynamique
+        d'essaim favorisant l'exploration de topologies diversifiées ;
+  \item \textbf{DE / SHADE} : compromis robuste avec auto-adaptation des
+        paramètres, égalant CMA-ES sur \texttt{prob3}.
+\end{itemize}
+
+L'extension des bornes du domaine des points de contrôle (bornes étendues)
+constitue un résultat notable : elle réduit le coût de 45\,\% sur
+\texttt{prob4} en supprimant la compression artificielle de la covariance
+aux frontières.
+
+\subsection{Limites}
+
+Plusieurs limites doivent être soulignées :
+\begin{itemize}[nosep]
+  \item La représentation par une \textbf{courbe de Bézier unique} de degré
+        fixe ($n = 10$) est intrinsèquement limitée pour les trajectoires à
+        virages serrés (\texttt{prob4}).
+  \item Le \textbf{budget temporel} de 60~secondes contraint fortement les
+        stratégies de \textit{restart} et de \textit{seeding} : un compromis
+        doit être trouvé entre la qualité de l'initialisation et le temps
+        restant pour l'optimisation.
+  \item L'\textbf{analyse statistique} préliminaire (10~exécutions) est
+        suffisante pour dégager des tendances, mais insuffisante pour des
+        conclusions définitives sur toutes les paires d'algorithmes.
+\end{itemize}
 
 \subsection{Perspectives}
 
-Plusieurs pistes d'amélioration pourraient être explorées :
-\begin{itemize}[nosep]
-  \item \textbf{Représentation multi-segments} : utiliser plusieurs courbes de
-        Bézier concaténées (spline) pour mieux représenter les virages serrés.
-  \item \textbf{BIPOP-CMA-ES} : alterner restarts avec grandes et petites
-        populations pour explorer simultanément différentes échelles.
-  \item \textbf{Hybridation avec une recherche tabou} : maintenir une mémoire
-        des régions déjà explorées pour forcer la diversification.
+La prochaine phase du projet portera sur :
+\begin{enumerate}[nosep]
+  \item \textbf{Hybridation PSO $\to$ CMA-ES} : utiliser PSO en phase
+        d'exploration pour identifier la topologie du chemin, puis CMA-ES pour
+        le raffinement de la trajectoire.
+  \item \textbf{Réglage fin des bornes étendues} : recherche systématique de
+        la marge optimale avec validation statistique rigoureuse.
+  \item \textbf{Benchmark étendu} : 30~exécutions indépendantes avec tests de
+        Friedman et Wilcoxon corrigés par Bonferroni.
   \item \textbf{Encodage adaptatif} : optimiser simultanément le nombre de
-        points de contrôle et leurs positions.
-\end{itemize}
+        points de contrôle et leurs positions, ou explorer des représentations
+        alternatives (splines).
+\end{enumerate}

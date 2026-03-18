@@ -1,71 +1,15 @@
 % =============================================================================
-\section{Méthodes d'optimisation}
+\section{Méthodes d'optimisation retenues}
 \label{sec:methods}
 % =============================================================================
 
-Cette section présente les trois familles de métaheuristiques implémentées.
-Pour chacune, nous rappelons le principe, donnons les équations clés et
-précisons les hyperparamètres retenus.
-
-% ----- GA --------------------------------------------------------------------
-\subsection{Algorithme génétique réel (GA)}
-\label{sec:ga}
-
-\subsubsection{Principe}
-
-Un algorithme génétique (AG) maintient une population d'individus (vecteurs
-$\mathbf{x} \in \mathbb{R}^d$) et les fait évoluer par des opérateurs de
-sélection, croisement et mutation inspirés de la génétique~\cite{deb2001}.
-
-\subsubsection{Sélection par tournoi binaire}
-
-Deux individus sont tirés au hasard ; le meilleur (fitness minimale) est
-sélectionné comme parent. Ce processus est répété pour chaque parent nécessaire
-au croisement.
-
-\subsubsection{Croisement SBX (\emph{Simulated Binary Crossover})}
-
-Pour deux parents $\mathbf{p}_1, \mathbf{p}_2$, un enfant $\mathbf{c}$ est
-généré composante par composante.  Avec probabilité $p_c = 0{,}9$ :
-\[
-  u \sim \mathcal{U}(0,1), \qquad
-  \beta_q =
-  \begin{cases}
-    (2u)^{1/(\eta_c+1)}, & \text{si } u \leq 0{,}5, \\
-    \bigl(\frac{1}{2(1-u)}\bigr)^{1/(\eta_c+1)}, & \text{sinon},
-  \end{cases}
-\]
-\[
-  c_i = \frac{1}{2}\bigl[(1+\beta_q)\,p_{1,i} + (1-\beta_q)\,p_{2,i}\bigr],
-\]
-avec $\eta_c = 20$ (indice de distribution).  Un $\eta_c$ élevé concentre les
-enfants autour des parents.
-
-\subsubsection{Mutation polynomiale}
-
-Chaque composante $x_i$ est mutée avec probabilité $p_m = 1/d$ :
-\[
-  r \sim \mathcal{U}(0,1), \qquad
-  \delta_q =
-  \begin{cases}
-    (2r)^{1/(\eta_m+1)} - 1, & \text{si } r < 0{,}5, \\
-    1 - \bigl(2(1-r)\bigr)^{1/(\eta_m+1)}, & \text{sinon},
-  \end{cases}
-\]
-\[
-  x_i' = x_i + \delta_q \cdot (x_{i,\max} - x_{i,\min}),
-\]
-avec $\eta_m = 20$.  La valeur est ensuite tronquée dans les bornes.
-
-\subsubsection{Élitisme}
-
-Le meilleur individu de la génération précédente est systématiquement conservé
-dans la nouvelle population, remplaçant le plus mauvais descendant si
-nécessaire.
-
-\paragraph{Paramètres retenus.}
-Population $N_P = 100$, $\eta_c = \eta_m = 20$, $p_c = 0{,}9$,
-$p_m = 1/d$.
+Cette section présente les trois familles de métaheuristiques retenues après
+une phase exploratoire (cf.\ section~\ref{sec:autres_algorithmes}).  Pour
+chacune, nous rappelons le principe, donnons les équations clés et précisons
+les hyperparamètres.  Le choix de ces trois familles est motivé par leur
+complémentarité : CMA-ES excelle sur les problèmes corrélés (prob1--prob3),
+PSO sur les paysages fortement multimodaux (prob4), et DE/SHADE offre un
+compromis robuste avec auto-adaptation des paramètres.
 
 % ----- DE --------------------------------------------------------------------
 \subsection{Évolution différentielle (DE)}
@@ -103,7 +47,7 @@ moins une composante provient du mutant.
 
 \subsubsection{Sélection gloutonne}
 
-L'individu d'essai remplace la cible si et seulement si sa fitness est
+L'individu d'essai remplace la cible si et seulement si sa \textit{fitness} est
 meilleure ou égale :
 $\mathbf{x}_i^{(g+1)} = \mathbf{u}_i$ si $f(\mathbf{u}_i) \leq
 f(\mathbf{x}_i^{(g)})$, sinon $\mathbf{x}_i^{(g+1)} = \mathbf{x}_i^{(g)}$.
@@ -164,7 +108,7 @@ décomposition en valeurs propres de la matrice de covariance.
 
 \subsubsection{Mise à jour du centroïde}
 
-Les $\mu$ meilleurs descendants (triés par fitness croissante) sont combinés
+Les $\mu$ meilleurs descendants (triés par \textit{fitness} croissante) sont combinés
 par moyenne pondérée :
 \begin{equation}
   \mathbf{m}^{(g+1)} = \sum_{i=1}^{\mu} w_i \, \mathbf{x}_{i:\lambda}^{(g+1)},
@@ -185,11 +129,15 @@ matrice~$\mathbf{C}$ :
       \frac{\mathbf{m}^{(g+1)} - \mathbf{m}^{(g)}}{\sigma^{(g)}},
     \label{eq:pc}
 \end{align}
-avec $\mu_{\text{eff}} = 1/\sum w_i^2$ la variance effective des poids.
+avec $\mu_{\text{eff}} = 1/\sum_{i=1}^{\mu} w_i^2$ la variance effective des
+poids.  L'indicateur $h_\sigma$ vaut 1 si
+$\|\mathbf{p}_\sigma^{(g+1)}\| < \bigl(1{,}4 + 2/(d+1)\bigr)\,\chi_d$ et 0
+sinon ; il évite une mise à jour de rang~1 lorsque $\sigma$ est trop petit
+(stagnation de $\mathbf{p}_\sigma$).
 
 \subsubsection{Adaptation du pas $\sigma$ (CSA)}
 
-Le \emph{Cumulative Step-size Adaptation} (CSA) ajuste $\sigma$ en comparant
+Le \textit{Cumulative Step-size Adaptation} (CSA) ajuste $\sigma$ en comparant
 la norme de $\mathbf{p}_\sigma$ à sa valeur attendue sous marche aléatoire
 isotrope :
 \begin{equation}
@@ -198,7 +146,9 @@ isotrope :
   \exp\!\left(\frac{c_\sigma}{d_\sigma}
     \left(\frac{\|\mathbf{p}_\sigma^{(g+1)}\|}{\chi_d} - 1\right)\right),
 \end{equation}
-où $\chi_d \approx \sqrt{d}\,(1 - 1/(4d) + 1/(21 d^2))$ est l'espérance de
+où $d_\sigma = 1 + 2\max\!\bigl(0,\,\sqrt{(\mu_{\text{eff}}-1)/(d+1)} -
+1\bigr) + c_\sigma$ est le facteur d'amortissement~\cite{hansen2001} et
+$\chi_d \approx \sqrt{d}\,(1 - 1/(4d) + 1/(21 d^2))$ l'espérance de
 $\|\mathcal{N}(\mathbf{0}, \mathbf{I})\|$.
 
 \emph{Discussion.}  Si les pas successifs sont alignés (bonne direction), la
@@ -220,29 +170,51 @@ La covariance est mise à jour par une combinaison de rang 1 et rang $\mu$ :
 \end{equation}
 
 \emph{Discussion.}  C'est cette adaptation de $\mathbf{C}$ qui distingue
-fondamentalement CMA-ES de GA et DE : l'algorithme apprend la \emph{structure de corrélation} du paysage de fitness, ce qui lui permet de concentrer la
+fondamentalement CMA-ES de GA et DE : l'algorithme apprend la \emph{structure de corrélation} du paysage de \textit{fitness}, ce qui lui permet de concentrer la
     recherche dans les directions les plus prometteuses.
 
 % ----- PSO -------------------------------------------------------------------
-\subsection{Optimisation par Essaim Particulaire (PSO)}
+\subsection{Optimisation par essaim particulaire (PSO)}
 \label{sec:pso}
 
 \subsubsection{Principe}
-L'Optimisation par Essaim Particulaire (PSO) s'inspire du comportement social des bancs de poissons ou des volées d'oiseaux. Chaque particule $i$ se déplace dans l'espace de recherche avec une vitesse $\mathbf{v}_i$ qui est mise à jour en fonction de sa propre meilleure expérience ($\mathbf{pbest}_i$) et de la meilleure expérience globale de l'essaim ($\mathbf{gbest}$).
+L'optimisation par essaim particulaire~\cite{kennedy1995} s'inspire du
+comportement collectif des bancs de poissons ou des volées d'oiseaux.  Chaque
+particule $i$ se déplace dans l'espace de recherche $\mathbb{R}^d$ avec une
+vitesse $\mathbf{v}_i$ mise à jour en fonction de sa meilleure position
+personnelle $\mathbf{p}_i$ (\textit{personal best}) et de la meilleure position
+globale de l'essaim $\mathbf{g}$ (\textit{global best}).
 
 \subsubsection{Mise à jour de la vitesse et de la position}
 À chaque itération $t$, la vitesse et la position sont mises à jour selon :
-\begin{equation}
-    \mathbf{v}_i^{(t+1)} = w \cdot \mathbf{v}_i^{(t)} + c_1 r_1 (\mathbf{pbest}_i - \mathbf{x}_i^{(t)}) + c_2 r_2 (\mathbf{gbest} - \mathbf{x}_i^{(t)})
-\end{equation}
-\begin{equation}
-    \mathbf{x}_i^{(t+1)} = \mathbf{x}_i^{(t)} + \mathbf{v}_i^{(t+1)}
-\end{equation}
-où $w$ est le coefficient d'inertie, $c_1$ et $c_2$ sont les coefficients d'accélération (cognitif et social), et $r_1, r_2 \sim \mathcal{U}(0,1)$.
+\begin{align}
+\label{eq:pso-velocity}
+    \mathbf{v}_i^{(t+1)} &= w \, \mathbf{v}_i^{(t)}
+      + c_1 \, \mathbf{r}_1 \odot (\mathbf{p}_i - \mathbf{x}_i^{(t)})
+      + c_2 \, \mathbf{r}_2 \odot (\mathbf{g} - \mathbf{x}_i^{(t)}), \\
+\label{eq:pso-position}
+    \mathbf{x}_i^{(t+1)} &= \mathbf{x}_i^{(t)} + \mathbf{v}_i^{(t+1)},
+\end{align}
+où $w$ est le coefficient d'inertie, $c_1$ et $c_2$ les coefficients
+d'accélération (cognitif et social), $\mathbf{r}_1, \mathbf{r}_2 \sim
+\mathcal{U}(0,1)^d$ des vecteurs aléatoires composante par composante, et
+$\odot$ le produit de Hadamard.
 
-\subsubsection{Gestion de l'inertie et stagnation}
-Pour favoriser l'exploration au début et l'exploitation à la fin, l'inertie $w$ décroît linéairement de $0{,}9$ à $0{,}4$ au cours des itérations.
-Un mécanisme d'anti-stagnation a été implémenté : si $\mathbf{gbest}$ ne s'améliore pas pendant un nombre donné de générations ($10 \times N$), 50\% des particules sont réinitialisées aléatoirement pour relancer l'exploration.
+\subsubsection{Gestion de l'inertie et mécanisme anti-stagnation}
+Pour favoriser l'exploration en début de recherche et l'exploitation en fin,
+l'inertie décroît linéairement de $w_{\max} = 0{,}9$ à $w_{\min} = 0{,}4$
+au cours des itérations.  Un mécanisme d'anti-stagnation complète cette
+dynamique : si $\mathbf{g}$ ne s'améliore pas pendant $10N$ générations
+consécutives, 50\,\% des particules sont réinitialisées aléatoirement afin
+de relancer la diversité de l'essaim.
+
+\emph{Discussion.}  PSO se distingue des stratégies d'évolution (CMA-ES, DE)
+par l'absence de modèle probabiliste explicite de la distribution des
+solutions.  La dynamique vitesse-position confère à l'essaim une mémoire
+cinétique qui lui permet de traverser des bassins d'attraction étroits,
+propriété particulièrement avantageuse sur les paysages labyrinthiques
+(cf.\ section~\ref{sec:prob4}).
 
 \paragraph{Paramètres retenus.}
-Taille de l'essaim $N = 10d$, $c_1 = c_2 = 2{,}0$, $v_{\max} = 0{,}2 \times \text{range}$.
+Taille de l'essaim $N = 10d$, $c_1 = c_2 = 2{,}0$, $v_{\max} = 0{,}2
+\times \text{range}$, seuil de stagnation $10N$ générations.
