@@ -17,8 +17,8 @@ import bench.competitors.astarseeds.AStarSeedsProject;
 import bench.competitors.alconst.ALConstraintProject;
 import bench.competitors.rfsurr.RFSurrogateProject;
 import bench.competitors.islands.IslandProject;
-import bezier.projects.competitor.gwo.GWOProject;
-import bezier.projects.competitor.firefly.FireflyProject;
+import engine.gwo.GWOProject;
+import engine.firefly.FireflyProject;
 import engine.core.AlgorithmParameters;
 
 /**
@@ -435,6 +435,13 @@ public class ProjectCatalog
     public static CompetitorProject firefly (Problem problem, double margin) throws InvalidProjectException
     {
         return new FireflyProject (problem, margin);
+    }
+
+    // === Hybride PSO -> CMA-ES ===
+
+    public static CompetitorProject hybrid (Problem problem) throws InvalidProjectException
+    {
+        return new bezier.projects.competitor.optipath.OptiPath (problem);
     }
 
     // === Helpers ===

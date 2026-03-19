@@ -42,16 +42,16 @@ public final class Main extends OutputWriter
 
 	private static final String LOG_FILE = "bezier.log";
 	private static final int AWAIT = 1;
-//	private static final int NB_RUNS = 10;
-	private static final int NB_RUNS = 1;
-//	private static final int NB_SECONDS = 60;
-	private static final int NB_SECONDS = 10;
+	private static final int NB_RUNS = 10;
+//	private static final int NB_RUNS = 1;
+	private static final int NB_SECONDS = 60;
+//	private static final int NB_SECONDS = 10;
 	public static final boolean DISPLAY_CHART = true;
 //	public static final boolean DISPLAY_CHART = false;
 	static final boolean DISPLAY_STD_OUT = true;
 //	static final boolean DISPLAY_STD_OUT = false;
-//	static final boolean COMPETITION = true;
-	static final boolean COMPETITION = false;
+	static final boolean COMPETITION = true;
+//	static final boolean COMPETITION = false;
 	
 	/**
 	 * @return Retourne l'instance de Main

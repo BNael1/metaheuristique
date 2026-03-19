@@ -89,7 +89,10 @@ public class AlgorithmFactory
                 return wrapProject(ProjectCatalog.rfSurrogate(problem, margin));
             case "Islands":
                 return wrapProject(ProjectCatalog.islands(problem, margin));
-                
+
+            case "Hybrid PSO-CMA-ES":
+                return wrapProject(ProjectCatalog.hybrid(problem));
+
             default:
                 throw new IllegalArgumentException ("Algorithme inconnu : " + algoName);
         }

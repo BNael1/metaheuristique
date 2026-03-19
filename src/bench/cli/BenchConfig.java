@@ -25,6 +25,7 @@ public class BenchConfig {
         "AStarSeeds",
         "ALConstraint",
         "RFSurrogate",
-        "Islands"
+        "Islands",
+        "Hybrid PSO-CMA-ES"
     };
 }

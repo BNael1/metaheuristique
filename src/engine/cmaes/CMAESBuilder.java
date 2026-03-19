@@ -48,6 +48,7 @@ public class CMAESBuilder
     private AlgorithmParameters parameters;
     private double [] customLb;
     private double [] customUb;
+    private double [] customInitMean;
 
     public CMAESBuilder (Problem problem)
     {
@@ -91,6 +92,16 @@ public class CMAESBuilder
     }
 
     /**
+     * Override the default initial mean (center line start→end) with a custom vector.
+     * Useful for seeding CMA-ES from a solution found by another algorithm.
+     */
+    public CMAESBuilder initMean (double [] initMean)
+    {
+        this.customInitMean = initMean != null ? initMean.clone () : null;
+        return this;
+    }
+
+    /**
      * Override the default bounds (problem rectangle) with custom bounds.
      * Arrays are cloned to avoid external mutation.
      */
@@ -127,16 +138,24 @@ public class CMAESBuilder
             }
         }
 
-        double [] initMean = new double [d];
-        double sx = problem.getStartPoint ().getX ();
-        double sy = problem.getStartPoint ().getY ();
-        double ex = problem.getEndPoint ().getX ();
-        double ey = problem.getEndPoint ().getY ();
-        for (int k = 0; k < nCP; k++)
+        double [] initMean;
+        if (customInitMean != null && customInitMean.length == d)
         {
-            double t = (double) (k + 1) / (nCP + 1);
-            initMean [2 * k]     = sx + t * (ex - sx);
-            initMean [2 * k + 1] = sy + t * (ey - sy);
+            initMean = customInitMean.clone ();
+        }
+        else
+        {
+            initMean = new double [d];
+            double sx = problem.getStartPoint ().getX ();
+            double sy = problem.getStartPoint ().getY ();
+            double ex = problem.getEndPoint ().getX ();
+            double ey = problem.getEndPoint ().getY ();
+            for (int k = 0; k < nCP; k++)
+            {
+                double t = (double) (k + 1) / (nCP + 1);
+                initMean [2 * k]     = sx + t * (ex - sx);
+                initMean [2 * k + 1] = sy + t * (ey - sy);
+            }
         }
 
         // Défauts

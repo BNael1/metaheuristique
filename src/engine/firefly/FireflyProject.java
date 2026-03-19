@@ -1,4 +1,4 @@
-package bezier.projects.competitor.firefly;
+package engine.firefly;
 
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;

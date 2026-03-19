@@ -1,4 +1,4 @@
-package bezier.projects.competitor.gwo;
+package engine.gwo;
 
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;
