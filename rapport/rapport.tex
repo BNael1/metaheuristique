@@ -86,18 +86,16 @@
 \pagenumbering{roman}
 
 \begin{abstract}
-Ce rapport présente l'étude comparative de métaheuristiques à population pour
-l'optimisation de trajectoires 2D modélisées par des courbes de Bézier en
-présence d'obstacles.  Nous implémentons et évaluons 19~algorithmes et
-variantes couvrant quatre familles (GA, DE/SHADE, CMA-ES/BIPOP, PSO) sur
-quatre instances de difficulté croissante, avec un budget de 60~secondes.
-L'analyse expérimentale révèle la complémentarité des approches : CMA-ES
-domine sur les problèmes corrélés grâce à l'adaptation de la covariance, tandis
-que PSO surpasse toutes les méthodes d'un facteur~2 sur l'instance
-labyrinthique.  L'extension des bornes du domaine des points de contrôle réduit
-le coût de 45\,\% sur le problème le plus difficile.  Ces résultats orientent la
-sélection vers trois familles complémentaires pour la phase d'optimisation
-fine.
+Ce rapport présente la conception d'une métaheuristique pour l'optimisation de
+trajectoires 2D modélisées par des courbes de Bézier en présence d'obstacles.
+Après une phase exploratoire évaluant 19~algorithmes et variantes couvrant
+quatre familles (GA, DE/SHADE, CMA-ES/BIPOP, PSO), nous concevons
+\emph{OptiPath}, un algorithme basé sur CMA-ES combinant seeding massif,
+portfolio à deux marges de bornes étendues et restart adaptatif.  OptiPath
+obtient en moyenne sur 10~exécutions : $36{,}80$ (\texttt{prob1}), $31{,}42$
+(\texttt{prob2}), $29{,}02$ (\texttt{prob3}) et $94{,}60$ (\texttt{prob4}),
+réduisant le coût sur l'instance labyrinthique d'un facteur~16 par rapport aux
+meilleures méthodes de la phase exploratoire.
 \end{abstract}
 \thispagestyle{empty}
 \newpage

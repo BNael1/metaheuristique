@@ -3,11 +3,11 @@
 \addcontentsline{toc}{section}{Synthèse exécutive}
 % =============================================================================
 
-Ce rapport présente l'étude comparative de métaheuristiques à population pour
+Ce rapport présente la conception et l'évaluation d'une métaheuristique pour
 l'optimisation de trajectoires 2D modélisées par des courbes de Bézier en
 présence d'obstacles.  L'objectif est de minimiser une fonction de coût
 composite (longueur, collisions, courbure, sortie de zone) sous contrainte de
-temps (60~secondes).
+temps (60~secondes), la qualité étant évaluée en moyenne sur 10~exécutions.
 
 \paragraph{Phase exploratoire.}
 Nous avons implémenté et évalué 19~algorithmes et variantes, couvrant quatre
@@ -18,29 +18,30 @@ complémentaires ont été testés : hybridation avec A*, modèles de substituti
 (\textit{surrogate}), gestion avancée des contraintes (Lagrangien augmenté,
 \textit{stochastic ranking}), et bornes étendues.
 
-\paragraph{Résultats clés.}
-L'analyse expérimentale sur quatre instances de difficulté croissante met en
-évidence trois résultats principaux :
-\begin{enumerate}
-  \item \textbf{CMA-ES} est la méthode la plus performante et la plus stable
-        sur les instances à paysage corrélé (\texttt{prob1} : $36{,}35 \pm
-        0{,}01$ ; \texttt{prob3} : $28{,}45 \pm 0{,}16$), grâce à
-        l'adaptation de la matrice de covariance.
-  \item \textbf{PSO} surpasse l'ensemble des autres méthodes sur l'instance
-        labyrinthique \texttt{prob4} ($2\,941 \pm 633$ contre $>4\,600$ pour
-        la meilleure variante CMA-ES), grâce à sa dynamique d'essaim qui
-        favorise la découverte de topologies de chemin diversifiées.
-  \item \textbf{Les bornes étendues} (extension du domaine des points de
-        contrôle) réduisent le score CMA-ES sur \texttt{prob4} de 45\,\%
-        ($4\,845 \to 2\,655$ en moyenne ; meilleur score absolu : $1\,538$),
-        en supprimant la compression artificielle de la covariance aux
-        frontières.
+\paragraph{Résultats de la phase exploratoire.}
+L'analyse expérimentale sur quatre instances de difficulté croissante a mis en
+évidence la supériorité de CMA-ES sur les instances corrélées et le rôle
+décisif des bornes étendues pour l'instance labyrinthique \texttt{prob4}.
+
+\paragraph{Algorithme final : OptiPath.}
+Sur la base de ces observations, nous avons conçu \textbf{OptiPath}, une
+métaheuristique basée sur CMA-ES combinant trois mécanismes :
+\begin{enumerate}[nosep]
+  \item \textbf{Seeding massif} ($\sim$500~solutions initiales) suivi d'une
+        optimisation locale sur les 15~meilleures, pour identifier les bassins
+        d'attraction prometteurs.
+  \item \textbf{Portfolio à deux marges} : deux instances CMA-ES/BIPOP
+        fonctionnent en alternance avec des bornes étendues différentes
+        (marge~5 pour les instances simples, marge~15 pour les labyrinthes).
+  \item \textbf{Restart adaptatif} : si la meilleure solution dépasse un seuil
+        de coût après 5~secondes, les deux CMA-ES sont relancés depuis des
+        seeds diversifiés, offrant plusieurs tentatives indépendantes pour
+        trouver le bassin optimal.
 \end{enumerate}
 
-\paragraph{Sélection et perspectives.}
-Sur la base de ces résultats, nous retenons trois familles complémentaires pour
-la phase d'optimisation : \textbf{CMA-ES/BIPOP} (instances corrélées),
-\textbf{PSO} (instances multimodales), et \textbf{DE/SHADE} (compromis
-robuste).  La prochaine étape portera sur l'hybridation de ces méthodes
-(initialisation PSO suivie d'un raffinement CMA-ES), le réglage fin des bornes
-étendues, et la validation statistique rigoureuse des variantes retenues.
+\paragraph{Résultats finaux (moyenne sur 10~exécutions).}
+OptiPath obtient : \texttt{prob1}~$= 36{,}80$ ; \texttt{prob2}~$= 31{,}42$ ;
+\texttt{prob3}~$= 29{,}02$ ; \texttt{prob4}~$= 94{,}60$.  Sur l'instance
+labyrinthique \texttt{prob4}, OptiPath réduit le coût d'un facteur~16 par
+rapport aux meilleures méthodes de la phase exploratoire ($94{,}60$ contre
+$\sim$1\,517 pour L-SHADE avec bornes étendues).

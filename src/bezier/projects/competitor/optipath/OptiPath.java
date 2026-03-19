@@ -3,9 +3,6 @@ package bezier.projects.competitor.optipath;
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;
 import bezier.projects.InvalidProjectException;
-import engine.core.Optimizer;
-import engine.core.AlgorithmParameters;
-import engine.cmaes.CMAESBuilder;
 import java.util.ArrayList;
 import java.util.Random;
 
@@ -85,7 +82,7 @@ public class OptiPath extends CompetitorProject
         super (problem);
         addAuthor ("BENSAADI");
         addAuthor ("RAHALI");
-        setMethodName ("OptiPath (Hybrid PSO-CMA-ES)");
+        setMethodName ("OptiPath (Portfolio CMA-ES)");
         this.marginSmall = marginSmall;
         this.marginWide = marginWide;
     }
@@ -294,12 +291,12 @@ public class OptiPath extends CompetitorProject
 
         cmaesSmall = CMAESBuilder.bipop (problem)
                 .bounds (lbSmall, ubSmall).parameters (ps).initMean (initMean)
-                .covariance (new engine.covariance.ActiveCovariance (true))
-                .sampling (new engine.sampling.MirrorSampling ()).build ();
+                .covariance (new ActiveCovariance (true))
+                .sampling (new MirrorSampling ()).build ();
         cmaesWide = CMAESBuilder.bipop (problem)
                 .bounds (lbWide, ubWide).parameters (pw).initMean (initMean)
-                .covariance (new engine.covariance.ActiveCovariance (true))
-                .sampling (new engine.sampling.MirrorSampling ()).build ();
+                .covariance (new ActiveCovariance (true))
+                .sampling (new MirrorSampling ()).build ();
 
         cmaesSmall.init ();
         cmaesWide.init ();

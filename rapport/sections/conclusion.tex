@@ -1,58 +1,44 @@
 % =============================================================================
-\section{Conclusion et perspectives}
+\section{Conclusion}
 \label{sec:conclusion}
 % =============================================================================
 
-\subsection{Bilan}
+Ce projet a consisté à concevoir une métaheuristique pour l'optimisation de
+trajectoires par courbes de Bézier en présence d'obstacles, sous une contrainte
+de 60~secondes et une évaluation en moyenne sur 10~exécutions.
 
-Nous avons implémenté et comparé 19~algorithmes et variantes de
-métaheuristiques pour l'optimisation de trajectoires par courbes de Bézier sur
-quatre instances de difficulté croissante.  Cette exploration systématique a
-permis d'identifier trois familles complémentaires :
+\paragraph{Phase exploratoire.}
+L'implémentation et la comparaison de 19~algorithmes et variantes ont permis
+d'identifier CMA-ES/BIPOP comme la méthode la plus performante sur les
+instances corrélées, et de découvrir le rôle décisif des bornes étendues pour
+l'instance labyrinthique \texttt{prob4}.
+
+\paragraph{Algorithme final.}
+Ces observations ont conduit à la conception d'OptiPath, une métaheuristique
+basée sur CMA-ES combinant :
 \begin{itemize}[nosep]
-  \item \textbf{CMA-ES / BIPOP} : méthode la plus performante et la plus
-        stable sur les instances corrélées (\texttt{prob1}--\texttt{prob3}),
-        grâce à l'adaptation de la matrice de covariance ;
-  \item \textbf{PSO} : seule méthode atteignant des scores inférieurs à
-        3\,000 sur l'instance labyrinthique \texttt{prob4}, grâce à sa dynamique
-        d'essaim favorisant l'exploration de topologies diversifiées ;
-  \item \textbf{DE / SHADE} : compromis robuste avec auto-adaptation des
-        paramètres, égalant CMA-ES sur \texttt{prob3}.
+  \item un \textbf{seeding massif} ($\sim$500~solutions) avec optimisation
+        locale pour identifier les bassins d'attraction prometteurs ;
+  \item un \textbf{portfolio à deux marges} (5 et 15~unités) permettant de
+        traiter simultanément les instances simples et labyrinthiques ;
+  \item un \textbf{restart adaptatif} offrant plusieurs tentatives
+        indépendantes pour trouver le bassin optimal sur les instances
+        multimodales.
 \end{itemize}
 
-L'extension des bornes du domaine des points de contrôle (bornes étendues)
-constitue un résultat notable : elle réduit le coût de 45\,\% sur
-\texttt{prob4} en supprimant la compression artificielle de la covariance
-aux frontières.
+\paragraph{Résultats.}
+OptiPath obtient en moyenne sur 10~exécutions : $36{,}80$ sur \texttt{prob1},
+$31{,}42$ sur \texttt{prob2}, $29{,}02$ sur \texttt{prob3}, et $94{,}60$ sur
+\texttt{prob4}.  Le gain sur \texttt{prob4} est particulièrement significatif :
+un facteur~16 par rapport aux meilleures méthodes de la phase exploratoire,
+grâce à l'exploitation de la vitesse paramétrique des courbes de Bézier via les
+bornes étendues à marge~15.
 
-\subsection{Limites}
-
-Plusieurs limites doivent être soulignées :
-\begin{itemize}[nosep]
-  \item La représentation par une \textbf{courbe de Bézier unique} de degré
-        fixe ($n = 10$) est intrinsèquement limitée pour les trajectoires à
-        virages serrés (\texttt{prob4}).
-  \item Le \textbf{budget temporel} de 60~secondes contraint fortement les
-        stratégies de \textit{restart} et de \textit{seeding} : un compromis
-        doit être trouvé entre la qualité de l'initialisation et le temps
-        restant pour l'optimisation.
-  \item L'\textbf{analyse statistique} préliminaire (10~exécutions) est
-        suffisante pour dégager des tendances, mais insuffisante pour des
-        conclusions définitives sur toutes les paires d'algorithmes.
-\end{itemize}
-
-\subsection{Perspectives}
-
-La prochaine phase du projet portera sur :
-\begin{enumerate}[nosep]
-  \item \textbf{Hybridation PSO $\to$ CMA-ES} : utiliser PSO en phase
-        d'exploration pour identifier la topologie du chemin, puis CMA-ES pour
-        le raffinement de la trajectoire.
-  \item \textbf{Réglage fin des bornes étendues} : recherche systématique de
-        la marge optimale avec validation statistique rigoureuse.
-  \item \textbf{Benchmark étendu} : 30~exécutions indépendantes avec tests de
-        Friedman et Wilcoxon corrigés par Bonferroni.
-  \item \textbf{Encodage adaptatif} : optimiser simultanément le nombre de
-        points de contrôle et leurs positions, ou explorer des représentations
-        alternatives (splines).
-\end{enumerate}
+\paragraph{Enseignements.}
+Ce projet illustre l'importance de l'analyse du problème avant le choix de
+l'algorithme.  La découverte du mécanisme des bornes étendues — permettant aux
+points de contrôle de se placer hors du domaine pour que la courbe traverse les
+obstacles à grande vitesse paramétrique — a eu un impact bien supérieur à
+l'exploration de nouvelles métaheuristiques.  De même, le mécanisme de restart
+adaptatif, motivé par la contrainte d'évaluation en moyenne, a transformé un
+algorithme performant mais inconsistant en une solution robuste.
