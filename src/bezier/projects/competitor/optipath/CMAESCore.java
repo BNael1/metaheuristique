@@ -80,6 +80,15 @@ public class CMAESCore implements Optimizer
     private int maxStagnation;
     private double prevBestGen;
 
+    // ===== Buffers pré-alloués (réduit GC pressure) =====
+    private double [] meanBuf;        // d
+    private double [] diffBuf;        // d
+    private double [] tmpVec;         // d
+    private Integer [] idxBuf;        // lambda
+    private double [][] eigenVBuf;    // d × d
+    private double [] eigenDdBuf;     // d
+    private double [] eigenEeBuf;     // d
+
     // ===== Constructeur =====
     public CMAESCore (Problem problem, int d, double [] lb, double [] ub,
                       double [] initMean,
@@ -393,6 +402,16 @@ public class CMAESCore implements Optimizer
         pc = new double [d];
         diagD = new double [d];
 
+        // Buffers pré-alloués (réutilisés à chaque step)
+        meanBuf = new double [d];
+        diffBuf = new double [d];
+        tmpVec = new double [d];
+        idxBuf = new Integer [lambda];
+        for (int i = 0; i < lambda; i++) idxBuf [i] = i;
+        eigenVBuf = new double [d][d];
+        eigenDdBuf = new double [d];
+        eigenEeBuf = new double [d];
+
         covUpdate.prepareRestart ();
 
         boolean sepMode = (covUpdate.getMode () == CovarianceUpdate.Mode.SEPARABLE);
@@ -513,26 +532,24 @@ public class CMAESCore implements Optimizer
         }
 
         // Tri
-        Integer [] idx = new Integer [lambda];
-        for (int i = 0; i < lambda; i++) idx [i] = i;
-        constraintHandler.sortPopulation (idx, fitness, arx);
+        for (int i = 0; i < lambda; i++) idxBuf [i] = i;
+        constraintHandler.sortPopulation (idxBuf, fitness, arx);
 
         // Nouveau mean
-        double [] oldMean = mean.clone ();
-        mean = new double [d];
+        System.arraycopy (mean, 0, meanBuf, 0, d);
+        Arrays.fill (mean, 0.0);
         for (int j = 0; j < mu; j++)
         {
-            int ii = idx [j];
+            int ii = idxBuf [j];
             for (int i = 0; i < d; i++) mean [i] += weights [j] * arx [ii][i];
         }
 
-        double [] meanDiffNorm = new double [d];
-        for (int i = 0; i < d; i++) meanDiffNorm [i] = (mean [i] - oldMean [i]) / sigma;
+        for (int i = 0; i < d; i++) diffBuf [i] = (mean [i] - meanBuf [i]) / sigma;
 
         // p_σ  (CSA) — en mode Sep, invsqrtC = diag(1/diagD)
         double csigFac = Math.sqrt (csig * (2.0 - csig) * mueff);
         for (int i = 0; i < d; i++)
-            ps [i] = (1.0 - csig) * ps [i] + csigFac * (meanDiffNorm [i] / diagD [i]);
+            ps [i] = (1.0 - csig) * ps [i] + csigFac * (diffBuf [i] / diagD [i]);
 
         double psNorm = vecNorm (ps);
 
@@ -543,11 +560,11 @@ public class CMAESCore implements Optimizer
 
         double ccFac = Math.sqrt (cc * (2.0 - cc) * mueff);
         for (int i = 0; i < d; i++)
-            pc [i] = (1.0 - cc) * pc [i] + hsig * ccFac * meanDiffNorm [i];
+            pc [i] = (1.0 - cc) * pc [i] + hsig * ccFac * diffBuf [i];
 
         // Mise à jour diagonale via covUpdate
-        covUpdate.updateDiagonal (diagC, diagD, pc, arx, oldMean, sigma,
-                idx, weights, mu, c1, cmu, hsig, cc);
+        covUpdate.updateDiagonal (diagC, diagD, pc, arx, meanBuf, sigma,
+                idxBuf, weights, mu, c1, cmu, hsig, cc);
 
         // σ
         sigma *= Math.exp ((csig / dsig) * (psNorm / chiN - 1.0));
@@ -557,7 +574,7 @@ public class CMAESCore implements Optimizer
         generation++;
 
         // Stagnation
-        double genBest = fitness [idx [0]];
+        double genBest = fitness [idxBuf [0]];
         if (genBest < prevBestGen - 1e-12)
         {
             stagnationCounter = 0;
@@ -597,29 +614,27 @@ public class CMAESCore implements Optimizer
         }
 
         // 3. Trier via le ConstraintHandler
-        Integer [] idx = new Integer [lambda];
-        for (int i = 0; i < lambda; i++) idx [i] = i;
-        constraintHandler.sortPopulation (idx, fitness, arx);
+        for (int i = 0; i < lambda; i++) idxBuf [i] = i;
+        constraintHandler.sortPopulation (idxBuf, fitness, arx);
 
-        // 4. Nouveau mean
-        double [] oldMean = mean.clone ();
-        mean = new double [d];
+        // 4. Nouveau mean (utilise meanBuf comme oldMean, diffBuf comme meanDiffNorm)
+        System.arraycopy (mean, 0, meanBuf, 0, d);
+        Arrays.fill (mean, 0.0);
         for (int j = 0; j < mu; j++)
         {
-            int ii = idx [j];
+            int ii = idxBuf [j];
             for (int i = 0; i < d; i++)
                 mean [i] += weights [j] * arx [ii][i];
         }
 
-        double [] meanDiffNorm = new double [d];
         for (int i = 0; i < d; i++)
-            meanDiffNorm [i] = (mean [i] - oldMean [i]) / sigma;
+            diffBuf [i] = (mean [i] - meanBuf [i]) / sigma;
 
         // 5. Mise à jour p_σ (CSA)
-        double [] invsqrtCdiff = matVecMul (invsqrtC, meanDiffNorm);
+        matVecMulInPlace (invsqrtC, diffBuf, tmpVec);
         double csigFac = Math.sqrt (csig * (2.0 - csig) * mueff);
         for (int i = 0; i < d; i++)
-            ps [i] = (1.0 - csig) * ps [i] + csigFac * invsqrtCdiff [i];
+            ps [i] = (1.0 - csig) * ps [i] + csigFac * tmpVec [i];
 
         double psNorm = vecNorm (ps);
 
@@ -630,19 +645,20 @@ public class CMAESCore implements Optimizer
 
         double ccFac = Math.sqrt (cc * (2.0 - cc) * mueff);
         for (int i = 0; i < d; i++)
-            pc [i] = (1.0 - cc) * pc [i] + hsig * ccFac * meanDiffNorm [i];
+            pc [i] = (1.0 - cc) * pc [i] + hsig * ccFac * diffBuf [i];
 
         // 7. Mise à jour de C via la stratégie injectée
-        covUpdate.updateCovariance (C, pc, ary, idx, weights, mu, c1, cmu, hsig, cc);
+        covUpdate.updateCovariance (C, pc, ary, idxBuf, weights, mu, c1, cmu, hsig, cc);
 
         // 8. Mise à jour de σ
         sigma *= Math.exp ((csig / dsig) * (psNorm / chiN - 1.0));
         sigma = Math.max (sigma, 1e-20);
         sigma = Math.min (sigma, 1e6);
 
-        // 9. Eigendecomposition
+        // 9. Eigendecomposition (throttled : tous les eigenFreq steps)
         eigenCounter++;
-        if (eigenCounter >= 1)
+        int eigenFreq = Math.max (1, (int) (1.0 / ((c1 + cmu) * d) / 10.0));
+        if (eigenCounter >= eigenFreq)
         {
             eigenDecomposition ();
             eigenCounter = 0;
@@ -651,7 +667,7 @@ public class CMAESCore implements Optimizer
         generation++;
 
         // 10. Détection de stagnation et restart
-        double genBest = fitness [idx [0]];
+        double genBest = fitness [idxBuf [0]];
         if (genBest < prevBestGen - 1e-12)
         {
             stagnationCounter = 0;
@@ -762,21 +778,20 @@ public class CMAESCore implements Optimizer
     // ================================================================
     private void eigenDecomposition ()
     {
-        double [][] V = new double [d][d];
+        // Réutilise les buffers pré-alloués
         for (int i = 0; i < d; i++)
-            for (int j = 0; j < d; j++)
-                V [i][j] = C [i][j];
+            System.arraycopy (C [i], 0, eigenVBuf [i], 0, d);
 
-        double [] dd = new double [d];
-        double [] ee = new double [d];
+        Arrays.fill (eigenDdBuf, 0.0);
+        Arrays.fill (eigenEeBuf, 0.0);
 
-        tred2 (V, dd, ee);
-        tql2  (V, dd, ee);
+        tred2 (eigenVBuf, eigenDdBuf, eigenEeBuf);
+        tql2  (eigenVBuf, eigenDdBuf, eigenEeBuf);
 
         for (int i = 0; i < d; i++)
-            diagD [i] = Math.sqrt (Math.max (dd [i], 1e-20));
+            diagD [i] = Math.sqrt (Math.max (eigenDdBuf [i], 1e-20));
 
-        B = V;
+        B = eigenVBuf;
 
         for (int i = 0; i < d; i++)
             for (int j = 0; j <= i; j++)
@@ -928,13 +943,15 @@ public class CMAESCore implements Optimizer
 
     // ===== Utilitaires =====
 
-    private double [] matVecMul (double [][] M, double [] v)
+    /** Multiplie M × v et stocke le résultat dans out (pas d'allocation). */
+    private void matVecMulInPlace (double [][] M, double [] v, double [] out)
     {
-        double [] r = new double [d];
         for (int i = 0; i < d; i++)
-            for (int j = 0; j < d; j++)
-                r [i] += M [i][j] * v [j];
-        return r;
+        {
+            double sum = 0;
+            for (int j = 0; j < d; j++) sum += M [i][j] * v [j];
+            out [i] = sum;
+        }
     }
 
     private double vecNorm (double [] v)
