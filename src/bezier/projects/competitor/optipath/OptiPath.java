@@ -34,11 +34,8 @@ public class OptiPath extends CompetitorProject
     /** Fraction du temps pour le seeding initial. */
     private static final double SEED_RATIO = 0.10;
 
-    /** Si bestFitness > ce seuil apres RESTART_CHECK_MS, on relance. */
-    private static final double RESTART_THRESHOLD = 500.0;
-
-    /** Intervalle entre verifications de stagnation (ms). */
-    private static final long RESTART_CHECK_MS = 5_000;
+    /** Strategie de restart externe (remplace le seuil fixe 500). */
+    private final OuterRestartStrategy restartStrategy;
 
     // ================================================================
     //  ETAT
@@ -58,6 +55,15 @@ public class OptiPath extends CompetitorProject
     /** Compteur de restarts pour diversifier les seeds. */
     private int restartCount;
 
+    /** Fitness au moment du dernier lancement CMA-ES. */
+    private double fitnessAtLaunch;
+
+    /** Sigma initial des CMA-ES (pour detection effondrement). */
+    private double initialSigmaSmall, initialSigmaWide;
+
+    /** Stats du seeding pour les strategies adaptatives. */
+    private SeedingStats seedStats;
+
     // Seeding : top seeds + optim locale
     private ArrayList<double []> topSeeds;
     private int localOptIdx;
@@ -73,10 +79,17 @@ public class OptiPath extends CompetitorProject
 
     public OptiPath (Problem problem) throws InvalidProjectException
     {
-        this (problem, 5.0, 15.0);
+        this (problem, 5.0, 15.0, new LegacyThresholdRestart ());
     }
 
-    OptiPath (Problem problem, double marginSmall, double marginWide)
+    public OptiPath (Problem problem, OuterRestartStrategy strategy)
+            throws InvalidProjectException
+    {
+        this (problem, 5.0, 15.0, strategy);
+    }
+
+    OptiPath (Problem problem, double marginSmall, double marginWide,
+              OuterRestartStrategy strategy)
             throws InvalidProjectException
     {
         super (problem);
@@ -85,6 +98,7 @@ public class OptiPath extends CompetitorProject
         setMethodName ("OptiPath (Portfolio CMA-ES)");
         this.marginSmall = marginSmall;
         this.marginWide = marginWide;
+        this.restartStrategy = strategy;
     }
 
     // ================================================================
@@ -192,6 +206,22 @@ public class OptiPath extends CompetitorProject
         topSeeds = new ArrayList<> ();
         for (int i = 0; i < Math.min (15, idx.length); i++)
             topSeeds.add (allSeeds.get (idx[i]).clone ());
+
+        // Calculer SeedingStats pour les strategies adaptatives
+        int n = allFitness.size ();
+        double [] sorted = new double [n];
+        for (int i = 0; i < n; i++) sorted[i] = allFitness.get (idx[i]);
+        double best = sorted[0];
+        double median = sorted[n / 2];
+        double p25 = sorted[n / 4];
+        double mean = 0;
+        for (double v : sorted) mean += v;
+        mean /= n;
+        double variance = 0;
+        for (double v : sorted) variance += (v - mean) * (v - mean);
+        variance /= n;
+        seedStats = new SeedingStats (best, median, Math.sqrt (variance), p25);
+        restartStrategy.init (seedStats);
     }
 
     private void addSeed (ArrayList<double []> seeds, ArrayList<Double> fits, double [] p)
@@ -219,15 +249,40 @@ public class OptiPath extends CompetitorProject
         }
 
         if (!cmaesReady)
-            launchCMAES ();
+            launchBothCMAES ();
 
-        // --- Restart adaptatif ---
-        long sinceLaunch = System.currentTimeMillis () - lastRestartTime;
-        if (sinceLaunch > RESTART_CHECK_MS && globalBestFitness > RESTART_THRESHOLD)
+        // --- Restart adaptatif via strategie ---
+        long now = System.currentTimeMillis ();
+        long sinceLaunch = now - lastRestartTime;
+        long elapsedTotal = now - startTime;
+
+        OuterRestartContext ctx = new OuterRestartContext (
+                globalBestFitness, fitnessAtLaunch,
+                sinceLaunch, elapsedTotal, TOTAL_TIME_MS, restartCount,
+                cmaesSmall.getState ().sigma, cmaesWide.getState ().sigma,
+                cmaesSmall.getBestX (), cmaesWide.getBestX (),
+                cmaesSmall.getBestFitness (), cmaesWide.getBestFitness (),
+                seedStats);
+
+        OuterRestartStrategy.Decision decision = restartStrategy.shouldRestart (ctx);
+        if (decision != OuterRestartStrategy.Decision.CONTINUE)
         {
-            // On est dans un mauvais bassin -> relancer
             restartCount++;
-            launchCMAES ();
+            restartStrategy.onRestart ();
+            switch (decision)
+            {
+                case RESTART_BOTH:
+                    launchBothCMAES ();
+                    break;
+                case RESTART_SMALL:
+                    launchSingleCMAES (true);
+                    break;
+                case RESTART_WIDE:
+                    launchSingleCMAES (false);
+                    break;
+                default:
+                    break;
+            }
         }
 
         // Alterner small/wide
@@ -236,7 +291,10 @@ public class OptiPath extends CompetitorProject
         stepSmallNext = !stepSmallNext;
 
         // Tracker le meilleur (CMA-ES met a jour problem en interne)
+        double prev = globalBestFitness;
         globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
+        if (globalBestFitness < prev)
+            restartStrategy.onFitnessUpdate (globalBestFitness, System.currentTimeMillis ());
     }
 
     // ================================================================
@@ -276,12 +334,12 @@ public class OptiPath extends CompetitorProject
     // ================================================================
     //  Lancement / restart des CMA-ES
     // ================================================================
-    private void launchCMAES ()
+    private void launchBothCMAES ()
     {
         cmaesReady = true;
         lastRestartTime = System.currentTimeMillis ();
+        fitnessAtLaunch = globalBestFitness;
 
-        // Choisir un mean de demarrage diversifie selon le restart
         double [] initMean = pickRestartMean ();
 
         AlgorithmParameters ps = new AlgorithmParameters ();
@@ -301,7 +359,46 @@ public class OptiPath extends CompetitorProject
         cmaesSmall.init ();
         cmaesWide.init ();
 
-        // Mettre a jour le best apres le seeding interne de CMA-ES
+        initialSigmaSmall = cmaesSmall.getState ().sigma;
+        initialSigmaWide = cmaesWide.getState ().sigma;
+
+        globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
+    }
+
+    /**
+     * Relance un seul CMA-ES (pour restart partiel, T7).
+     * @param small true = relancer cmaesSmall, false = relancer cmaesWide.
+     */
+    void launchSingleCMAES (boolean small)
+    {
+        lastRestartTime = System.currentTimeMillis ();
+        fitnessAtLaunch = globalBestFitness;
+
+        double [] initMean = pickRestartMean ();
+
+        if (small)
+        {
+            AlgorithmParameters ps = new AlgorithmParameters ();
+            ps.setMargin (marginSmall);
+            cmaesSmall = CMAESBuilder.bipop (problem)
+                    .bounds (lbSmall, ubSmall).parameters (ps).initMean (initMean)
+                    .covariance (new ActiveCovariance (true))
+                    .sampling (new MirrorSampling ()).build ();
+            cmaesSmall.init ();
+            initialSigmaSmall = cmaesSmall.getState ().sigma;
+        }
+        else
+        {
+            AlgorithmParameters pw = new AlgorithmParameters ();
+            pw.setMargin (marginWide);
+            cmaesWide = CMAESBuilder.bipop (problem)
+                    .bounds (lbWide, ubWide).parameters (pw).initMean (initMean)
+                    .covariance (new ActiveCovariance (true))
+                    .sampling (new MirrorSampling ()).build ();
+            cmaesWide.init ();
+            initialSigmaWide = cmaesWide.getState ().sigma;
+        }
+
         globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
     }
 
@@ -353,4 +450,8 @@ public class OptiPath extends CompetitorProject
 
     public Optimizer getOptimizer ()
     { return cmaesReady ? cmaesSmall : null; }
+
+    public double getInitialSigmaSmall () { return initialSigmaSmall; }
+    public double getInitialSigmaWide () { return initialSigmaWide; }
+    public OuterRestartStrategy getRestartStrategy () { return restartStrategy; }
 }
