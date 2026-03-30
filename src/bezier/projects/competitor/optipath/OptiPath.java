@@ -12,15 +12,8 @@ import java.util.Random;
  * Structure :
  *   1. Seeding massif (~500 seeds) + optim locale sur top-10
  *   2. Portfolio CMA-ES small (margin=5) + CMA-ES wide (margin=15)
- *   3. Restart adaptatif : si le meilleur fitness reste > RESTART_THRESHOLD
- *      apres RESTART_CHECK_MS, on relance les deux CMA-ES depuis des seeds
- *      differents. Cela donne plusieurs tentatives independantes pour
- *      trouver le bassin optimal sur les problemes type labyrinthe.
- *
- * Sur prob1-3 : le seuil n'est jamais atteint, donc 100% du compute
- * va a l'exploitation normale.
- * Sur prob4 : chaque restart donne une nouvelle chance (~50%) de trouver
- * le chemin optimal a ~94. Avec 3-4 tentatives en 60s, on atteint >90%.
+ *   3. Restart externe multi-signaux (dynamique + frustration + optional geo)
+ *      sans seuil absolu de fitness.
  */
 public class OptiPath extends CompetitorProject
 {
@@ -30,6 +23,7 @@ public class OptiPath extends CompetitorProject
     private final double marginSmall;
     private final double marginWide;
     private static final long TOTAL_TIME_MS = 58_000;
+    private static final long RESTART_CHECK_EVERY_MS = 200;
 
     /** Fraction du temps pour le seeding initial. */
     private static final double SEED_RATIO = 0.10;
@@ -60,6 +54,13 @@ public class OptiPath extends CompetitorProject
 
     /** Sigma initial des CMA-ES (pour detection effondrement). */
     private double initialSigmaSmall, initialSigmaWide;
+    private double domainDiag;
+
+    /** Cadence de checks et deltas entre checks pour la strategie externe. */
+    private long lastRestartCheckMs;
+    private long lastCtxSnapshotMs;
+    private double lastBestSmall, lastBestWide;
+    private int lastEvalSmall, lastEvalWide;
 
     /** Stats du seeding pour les strategies adaptatives. */
     private SeedingStats seedStats;
@@ -79,10 +80,10 @@ public class OptiPath extends CompetitorProject
 
     public OptiPath (Problem problem) throws InvalidProjectException
     {
-        this (problem, 5.0, 15.0, new LegacyThresholdRestart ());
+        this (problem, 5.0, 15.0, HybridMultiSignalRestart.v1 ());
     }
 
-    public OptiPath (Problem problem, OuterRestartStrategy strategy)
+    OptiPath (Problem problem, OuterRestartStrategy strategy)
             throws InvalidProjectException
     {
         this (problem, 5.0, 15.0, strategy);
@@ -120,6 +121,15 @@ public class OptiPath extends CompetitorProject
         ubSmall = buildUb (marginSmall);
         lbWide  = buildLb (marginWide);
         ubWide  = buildUb (marginWide);
+        domainDiag = Math.hypot (problem.getMaxX () - problem.getMinX (),
+                                 problem.getMaxY () - problem.getMinY ());
+        if (domainDiag <= 0.0) domainDiag = 1.0;
+        lastRestartCheckMs = 0L;
+        lastCtxSnapshotMs = 0L;
+        lastBestSmall = Double.POSITIVE_INFINITY;
+        lastBestWide = Double.POSITIVE_INFINITY;
+        lastEvalSmall = 0;
+        lastEvalWide = 0;
 
         massiveSeed ();
 
@@ -251,18 +261,71 @@ public class OptiPath extends CompetitorProject
         if (!cmaesReady)
             launchBothCMAES ();
 
-        // --- Restart adaptatif via strategie ---
+        maybeCheckExternalRestart ();
+
+        // Alterner small/wide
+        if (stepSmallNext) cmaesSmall.step ();
+        else cmaesWide.step ();
+        stepSmallNext = !stepSmallNext;
+
+        // Tracker le meilleur (CMA-ES met a jour problem en interne)
+        double prev = globalBestFitness;
+        globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
+        if (globalBestFitness < prev)
+            restartStrategy.onFitnessUpdate (globalBestFitness, System.currentTimeMillis ());
+    }
+
+    private void maybeCheckExternalRestart ()
+    {
         long now = System.currentTimeMillis ();
+        if (lastRestartCheckMs != 0L && (now - lastRestartCheckMs) < RESTART_CHECK_EVERY_MS)
+            return;
+
+        OptimizerState sState = cmaesSmall.getState ();
+        OptimizerState wState = cmaesWide.getState ();
+
+        double bestSmall = cmaesSmall.getBestFitness ();
+        double bestWide  = cmaesWide.getBestFitness ();
+        int evalSmall = sState.evaluations;
+        int evalWide  = wState.evaluations;
+        int genSmall = sState.generation;
+        int genWide  = wState.generation;
+
+        long dtMs = (lastCtxSnapshotMs == 0L) ? Math.max (1L, now - lastRestartTime)
+                                              : Math.max (1L, now - lastCtxSnapshotMs);
+        double deltaBestSmall = Double.isFinite (lastBestSmall)
+                ? Math.max (0.0, lastBestSmall - bestSmall) : 0.0;
+        double deltaBestWide = Double.isFinite (lastBestWide)
+                ? Math.max (0.0, lastBestWide - bestWide) : 0.0;
+        int deltaEvalSmall = (lastCtxSnapshotMs == 0L) ? 0 : Math.max (0, evalSmall - lastEvalSmall);
+        int deltaEvalWide  = (lastCtxSnapshotMs == 0L) ? 0 : Math.max (0, evalWide - lastEvalWide);
+
         long sinceLaunch = now - lastRestartTime;
         long elapsedTotal = now - startTime;
 
         OuterRestartContext ctx = new OuterRestartContext (
+                now, dtMs,
                 globalBestFitness, fitnessAtLaunch,
                 sinceLaunch, elapsedTotal, TOTAL_TIME_MS, restartCount,
-                cmaesSmall.getState ().sigma, cmaesWide.getState ().sigma,
+                genSmall, genWide,
+                evalSmall, evalWide,
+                deltaEvalSmall, deltaEvalWide,
+                deltaBestSmall, deltaBestWide,
+                sState.sigma, wState.sigma,
                 cmaesSmall.getBestX (), cmaesWide.getBestX (),
-                cmaesSmall.getBestFitness (), cmaesWide.getBestFitness (),
-                seedStats);
+                bestSmall, bestWide,
+                seedStats,
+                domainDiag,
+                problem.getStartPoint ().getX (), problem.getStartPoint ().getY (),
+                problem.getEndPoint ().getX (), problem.getEndPoint ().getY (),
+                lbWide, ubWide);
+
+        lastRestartCheckMs = now;
+        lastCtxSnapshotMs = now;
+        lastBestSmall = bestSmall;
+        lastBestWide = bestWide;
+        lastEvalSmall = evalSmall;
+        lastEvalWide = evalWide;
 
         OuterRestartStrategy.Decision decision = restartStrategy.shouldRestart (ctx);
         if (decision != OuterRestartStrategy.Decision.CONTINUE)
@@ -284,17 +347,6 @@ public class OptiPath extends CompetitorProject
                     break;
             }
         }
-
-        // Alterner small/wide
-        if (stepSmallNext) cmaesSmall.step ();
-        else cmaesWide.step ();
-        stepSmallNext = !stepSmallNext;
-
-        // Tracker le meilleur (CMA-ES met a jour problem en interne)
-        double prev = globalBestFitness;
-        globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
-        if (globalBestFitness < prev)
-            restartStrategy.onFitnessUpdate (globalBestFitness, System.currentTimeMillis ());
     }
 
     // ================================================================
@@ -361,6 +413,7 @@ public class OptiPath extends CompetitorProject
 
         initialSigmaSmall = cmaesSmall.getState ().sigma;
         initialSigmaWide = cmaesWide.getState ().sigma;
+        resetCtxTracking (System.currentTimeMillis ());
 
         globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
     }
@@ -399,7 +452,21 @@ public class OptiPath extends CompetitorProject
             initialSigmaWide = cmaesWide.getState ().sigma;
         }
 
+        resetCtxTracking (System.currentTimeMillis ());
+
         globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
+    }
+
+    private void resetCtxTracking (long now)
+    {
+        lastRestartCheckMs = now;
+        lastCtxSnapshotMs = 0L;
+        OptimizerState sState = cmaesSmall != null ? cmaesSmall.getState () : null;
+        OptimizerState wState = cmaesWide != null ? cmaesWide.getState () : null;
+        lastBestSmall = cmaesSmall != null ? cmaesSmall.getBestFitness () : Double.POSITIVE_INFINITY;
+        lastBestWide = cmaesWide != null ? cmaesWide.getBestFitness () : Double.POSITIVE_INFINITY;
+        lastEvalSmall = sState != null ? sState.evaluations : 0;
+        lastEvalWide = wState != null ? wState.evaluations : 0;
     }
 
     /**
