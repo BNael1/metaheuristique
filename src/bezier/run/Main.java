@@ -42,15 +42,19 @@ public final class Main extends OutputWriter {
 	private static final String LOG_FILE = "bezier.log";
 	private static final int AWAIT = 1;
 	// private static final int NB_RUNS = 10;
-	private static final int NB_RUNS = 1;
+	private static final int NB_RUNS = 10;
 	private static final int NB_SECONDS = 60;
 	// private static final int NB_SECONDS = 10;
 	public static final boolean DISPLAY_CHART = true;
-	// public static final boolean DISPLAY_CHART = false;
+	//public static final boolean DISPLAY_CHART = false;
 	static final boolean DISPLAY_STD_OUT = true;
 	// static final boolean DISPLAY_STD_OUT = false;
 	static final boolean COMPETITION = true;
 	// static final boolean COMPETITION = false;
+
+	// ====== CHOIX DES PROBLEMES A LANCER ======
+	// Mettre les numeros des probs voulus (ex: {4} pour prob4 seul, {1,2,3,4} pour tous)
+	private static final int[] SELECTED_PROBLEMS = {7};
 
 	/**
 	 * @return Retourne l'instance de Main
@@ -66,8 +70,8 @@ public final class Main extends OutputWriter {
 
 	private static Solution run(Class<?> subClass, Problem problem)
 			throws InterruptedException, ExecutionException, InstantiationException, IllegalAccessException,
-			IllegalArgumentException, InvocationTargetException, SecurityException {
-		Project project = (Project) subClass.getConstructors()[0].newInstance(problem);
+			IllegalArgumentException, InvocationTargetException, SecurityException, NoSuchMethodException {
+		Project project = (Project) subClass.getConstructor(Problem.class).newInstance(problem);
 		ExecutorService executor = Executors.newSingleThreadExecutor();
 		Future<?> future = executor.submit(project);
 		Solution solution = null;
@@ -137,10 +141,13 @@ public final class Main extends OutputWriter {
 							fields[j].set(null, null);
 					}
 				}
-				solutions.add(Main.run(subClass, problem));
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
+				Solution sol = Main.run(subClass, problem);
+					solutions.add(sol);
+					out.println("  Run " + (i + 1) + "/" + NB_RUNS + " -> " + sol.getEvaluation());
+					out.flush();
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
 		System.setOut(out);
 		return new Solution(solutions);
 	}
@@ -158,7 +165,12 @@ public final class Main extends OutputWriter {
 		else
 			this.println("");
 		Problem.getProblems();
-		ArrayList<Problem> problems = Problem.getProblems();
+		ArrayList<Problem> allProblems = Problem.getProblems();
+		ArrayList<Problem> problems = new ArrayList<Problem>();
+		for (Problem p : allProblems)
+			for (int sel : SELECTED_PROBLEMS)
+				if (p.getName().contains(String.valueOf(sel)))
+				{ problems.add(p); break; }
 		int maxLength = 0;
 		for (Problem problem : problems)
 			if (problem.getName().length() > maxLength)
@@ -201,6 +213,7 @@ public final class Main extends OutputWriter {
 					this.print(" ");
 				Solution solution = Main.exec(subClass, problem);
 				this.println("\t" + solution.getEvaluation());
+				System.out.flush();
 				solutions.get(i).add(solution);
 			}
 			this.print();

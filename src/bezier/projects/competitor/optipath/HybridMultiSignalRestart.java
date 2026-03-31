@@ -21,11 +21,18 @@ public class HybridMultiSignalRestart implements OuterRestartStrategy
     }
 
     private static final double EPS = 1e-12;
-    private static final long MIN_RUN_MS = 3_000;
+    private static final long MIN_RUN_MS_EASY = 3_000;
+    private static final long MIN_RUN_MS_HARD = 5_000;
     private static final long COOLDOWN_MS = 1_500;
-    private static final long STUCK_FORCE_RESTART_MS = 18_000;
+    private static final long STUCK_FORCE_MS_EASY = 18_000;
+    private static final long STUCK_FORCE_MS_HARD = 25_000;
     private static final long UCB_HORIZON_MS = 2_000;
     private static final double MAX_RUN_RATIO = 0.22;
+    private static final double HARD_RATIO_THRESHOLD = 0.70;
+
+    /** Seuils effectifs adaptes a la difficulte du probleme. */
+    private long effectiveMinRunMs = MIN_RUN_MS_EASY;
+    private long effectiveStuckMs = STUCK_FORCE_MS_EASY;
 
     private static final double ALPHA_R = 0.25;
     private static final double ALPHA_F = 0.20;
@@ -120,6 +127,21 @@ public class HybridMultiSignalRestart implements OuterRestartStrategy
     public void init (SeedingStats stats)
     {
         resetAllState ();
+        // Adapter les seuils a la difficulte du probleme
+        if (stats != null && stats.percentile25 > 0.0)
+        {
+            double ratio = stats.bestFitness / stats.percentile25;
+            if (ratio > HARD_RATIO_THRESHOLD)
+            {
+                effectiveMinRunMs = MIN_RUN_MS_HARD;
+                effectiveStuckMs = STUCK_FORCE_MS_HARD;
+            }
+            else
+            {
+                effectiveMinRunMs = MIN_RUN_MS_EASY;
+                effectiveStuckMs = STUCK_FORCE_MS_EASY;
+            }
+        }
     }
 
     @Override
@@ -139,13 +161,13 @@ public class HybridMultiSignalRestart implements OuterRestartStrategy
     {
         updateBanditRewards (ctx);
 
-        if (ctx.sinceLaunchMs < MIN_RUN_MS)
+        if (ctx.sinceLaunchMs < effectiveMinRunMs)
         {
             updateSignals (ctx);
             return Decision.CONTINUE;
         }
 
-        if (ctx.nowMs - lastImprovementMs >= STUCK_FORCE_RESTART_MS)
+        if (ctx.nowMs - lastImprovementMs >= effectiveStuckMs)
         {
             updateSignals (ctx);
             lastDecisionMs = ctx.nowMs;
