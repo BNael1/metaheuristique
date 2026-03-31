@@ -84,6 +84,11 @@ public class OptiPath extends CompetitorProject
     private long lastGlobalImproveMs;
     private long lastRescueBurstMs;
 
+    /** Waypoints detectes par l'analyse obstacle-aware (start, gaps, end). */
+    private double [][] detectedWaypoints;
+    /** Ratio longueur_waypoints / distance_directe (1.0 = ligne droite). */
+    private double pathComplexity;
+
     // Seeding : top seeds + optim locale
     private ArrayList<double []> topSeeds;
     private int localOptIdx;
@@ -138,6 +143,8 @@ public class OptiPath extends CompetitorProject
         lastGlobalImproveMs = startTime;
         lastRescueBurstMs = 0L;
         lastRefineMs = 0L;
+        detectedWaypoints = null;
+        pathComplexity = 1.0;
 
         nCP = problem.getNControlPoints ();
         d = 2 * nCP;
@@ -671,6 +678,11 @@ public class OptiPath extends CompetitorProject
         }
         if (totalDist < 1e-9) totalDist = 1.0;
 
+        // Stocker pour usage ulterieur (rescue, etc.)
+        this.detectedWaypoints = waypoints;
+        double directDist = Math.hypot (ex - sx, ey - sy);
+        this.pathComplexity = (directDist > 1e-9) ? totalDist / directDist : 1.0;
+
         // Calculer les positions de base des CPs par interpolation
         double [] baseXs = new double [nCP], baseYs = new double [nCP];
         for (int i = 0; i < nCP; i++)
@@ -692,7 +704,17 @@ public class OptiPath extends CompetitorProject
         // Strategie 1 : overshoot (amplifier les deviations)
         double lineY0 = sy, lineDy = ey - sy;
         double lineX0 = sx, lineDx = ex - sx;
-        for (double overshoot : new double [] {1.0, 1.3, 1.5, 1.8})
+        // Overshoot adaptatif : plus le chemin est complexe, plus on compense le lissage Bezier
+        double [] baseOvershoots = {1.0, 1.3, 1.5, 1.8};
+        double [] extraOvershoots = (pathComplexity > 2.0)
+                ? new double [] {2.0, 2.5, 3.0, 3.5}
+                : (pathComplexity > 1.5)
+                    ? new double [] {2.0, 2.5}
+                    : new double [0];
+        double [] allOvershoots = new double [baseOvershoots.length + extraOvershoots.length];
+        System.arraycopy (baseOvershoots, 0, allOvershoots, 0, baseOvershoots.length);
+        System.arraycopy (extraOvershoots, 0, allOvershoots, baseOvershoots.length, extraOvershoots.length);
+        for (double overshoot : allOvershoots)
         {
             for (int v = 0; v < 5; v++)
             {
@@ -746,6 +768,254 @@ public class OptiPath extends CompetitorProject
                 addSeed (seeds, fits, p);
             }
         }
+
+        // Strategie 3 : clustering adaptatif aux virages
+        addClusteredTurnSeeds (seeds, fits, waypoints);
+
+        // Strategie 4 : spline Hermite lisse a travers les waypoints
+        addHermiteSplineSeeds (seeds, fits, waypoints);
+    }
+
+    /**
+     * Clustering adaptatif : concentre les CPs aux virages serres.
+     * Plus l'angle est aigu, plus on y place de CPs.
+     */
+    private void addClusteredTurnSeeds (ArrayList<double []> seeds,
+                                         ArrayList<Double> fits,
+                                         double [][] waypoints)
+    {
+        int nWp = waypoints.length;
+        if (nWp < 3) return; // pas de virage
+
+        // Calculer l'angle de virage a chaque waypoint interieur
+        double [] turnAngles = new double [nWp];
+        double totalAngle = 0.0;
+        for (int w = 1; w < nWp - 1; w++)
+        {
+            double ax = waypoints[w][0] - waypoints[w-1][0];
+            double ay = waypoints[w][1] - waypoints[w-1][1];
+            double bx = waypoints[w+1][0] - waypoints[w][0];
+            double by = waypoints[w+1][1] - waypoints[w][1];
+            double magA = Math.hypot (ax, ay);
+            double magB = Math.hypot (bx, by);
+            if (magA < 1e-9 || magB < 1e-9) continue;
+            double cos = (ax * bx + ay * by) / (magA * magB);
+            cos = Math.max (-1.0, Math.min (1.0, cos));
+            turnAngles[w] = Math.PI - Math.acos (cos); // 0 = tout droit, PI = demi-tour
+            totalAngle += turnAngles[w];
+        }
+        if (totalAngle < 0.1) return; // virages negligeables
+
+        // Assigner un poids a chaque segment et virage
+        // Segments droits : poids = longueur normalisee
+        // Virages : poids = angle normalise (pondere 3x pour forcer le clustering)
+        double totalLen = 0.0;
+        double [] segLen = new double [nWp - 1];
+        for (int s = 0; s < nWp - 1; s++)
+        {
+            segLen[s] = Math.hypot (waypoints[s+1][0] - waypoints[s][0],
+                                    waypoints[s+1][1] - waypoints[s][1]);
+            totalLen += segLen[s];
+        }
+        if (totalLen < 1e-9) return;
+
+        // Construire une liste de "slots" : segments + virages
+        // Chaque slot a un poids qui determine combien de CPs y sont assignes
+        int nSlots = 2 * (nWp - 1) - 1; // segments + virages intercales
+        double [] slotWeights = new double [nSlots];
+        double totalWeight = 0.0;
+        for (int s = 0; s < nWp - 1; s++)
+        {
+            int si = 2 * s;
+            slotWeights[si] = segLen[s] / totalLen; // poids segment
+            totalWeight += slotWeights[si];
+            if (s < nWp - 2)
+            {
+                int ti = 2 * s + 1;
+                slotWeights[ti] = 3.0 * turnAngles[s + 1] / Math.PI; // poids virage
+                totalWeight += slotWeights[ti];
+            }
+        }
+        if (totalWeight < 1e-9) return;
+
+        // Normaliser et distribuer les CPs
+        int [] cpPerSlot = new int [nSlots];
+        int assigned = 0;
+        for (int s = 0; s < nSlots; s++)
+        {
+            cpPerSlot[s] = (int) Math.round ((slotWeights[s] / totalWeight) * nCP);
+            assigned += cpPerSlot[s];
+        }
+        // Corriger les arrondis
+        while (assigned < nCP) { cpPerSlot[0]++; assigned++; }
+        while (assigned > nCP) { for (int s = nSlots - 1; s >= 0 && assigned > nCP; s--)
+            { if (cpPerSlot[s] > 0) { cpPerSlot[s]--; assigned--; } } }
+
+        // Generer les seeds
+        for (int v = 0; v < 15; v++)
+        {
+            double [] p = new double [d];
+            int cpIdx = 0;
+            for (int s = 0; s < nSlots && cpIdx < nCP; s++)
+            {
+                boolean isTurn = (s % 2 == 1);
+                int wpBefore = s / 2;
+                int wpAfter = wpBefore + 1;
+
+                for (int c = 0; c < cpPerSlot[s] && cpIdx < nCP; c++)
+                {
+                    double noise = (v == 0) ? 0.0 : rng.nextGaussian () * (0.5 + v * 0.3);
+                    if (isTurn)
+                    {
+                        int wpTurn = wpAfter; // waypoint du virage
+                        // Direction entrante et sortante normalisees
+                        double inX = waypoints[wpTurn][0] - waypoints[wpTurn-1][0];
+                        double inY = waypoints[wpTurn][1] - waypoints[wpTurn-1][1];
+                        double outX = waypoints[wpTurn+1][0] - waypoints[wpTurn][0];
+                        double outY = waypoints[wpTurn+1][1] - waypoints[wpTurn][1];
+                        double inMag = Math.hypot (inX, inY);
+                        double outMag = Math.hypot (outX, outY);
+                        if (inMag > 1e-9) { inX /= inMag; inY /= inMag; }
+                        if (outMag > 1e-9) { outX /= outMag; outY /= outMag; }
+
+                        // Offset le long de la direction entrante/sortante
+                        double spread = 1.5;
+                        double frac = (cpPerSlot[s] == 1) ? 0.0
+                                : (double) c / (cpPerSlot[s] - 1) * 2.0 - 1.0; // -1 a +1
+                        double dirX = (frac < 0) ? inX : outX;
+                        double dirY = (frac < 0) ? inY : outY;
+                        p[2 * cpIdx] = waypoints[wpTurn][0] + Math.abs (frac) * spread * dirX + noise;
+                        p[2 * cpIdx + 1] = waypoints[wpTurn][1] + Math.abs (frac) * spread * dirY + noise;
+                    }
+                    else
+                    {
+                        // CP sur segment droit : repartition lineaire
+                        double frac = (cpPerSlot[s] <= 1) ? 0.5
+                                : (double) c / (cpPerSlot[s] - 1);
+                        // Petit offset pour ne pas etre exactement au waypoint
+                        double tt = 0.1 + frac * 0.8;
+                        p[2 * cpIdx] = waypoints[wpBefore][0]
+                                + tt * (waypoints[wpAfter][0] - waypoints[wpBefore][0]) + noise;
+                        p[2 * cpIdx + 1] = waypoints[wpBefore][1]
+                                + tt * (waypoints[wpAfter][1] - waypoints[wpBefore][1]) + noise;
+                    }
+                    cpIdx++;
+                }
+            }
+            repelControlPointsFromObstacles (p, 2);
+            addSeed (seeds, fits, p);
+        }
+    }
+
+    /**
+     * Seeding par spline Hermite cubique lisse a travers les waypoints.
+     * Genere des CPs echantillonnes le long d'une courbe lisse
+     * qui minimise la courbure aux virages.
+     */
+    private void addHermiteSplineSeeds (ArrayList<double []> seeds,
+                                         ArrayList<Double> fits,
+                                         double [][] waypoints)
+    {
+        int nWp = waypoints.length;
+        if (nWp < 3) return;
+
+        // Calculer les tangentes a chaque waypoint (Catmull-Rom style)
+        double [][] tangents = new double [nWp][2];
+        for (int w = 0; w < nWp; w++)
+        {
+            if (w == 0)
+            {
+                tangents[w][0] = waypoints[1][0] - waypoints[0][0];
+                tangents[w][1] = waypoints[1][1] - waypoints[0][1];
+            }
+            else if (w == nWp - 1)
+            {
+                tangents[w][0] = waypoints[nWp-1][0] - waypoints[nWp-2][0];
+                tangents[w][1] = waypoints[nWp-1][1] - waypoints[nWp-2][1];
+            }
+            else
+            {
+                // Bisectrice des directions entrante/sortante
+                tangents[w][0] = (waypoints[w+1][0] - waypoints[w-1][0]) * 0.5;
+                tangents[w][1] = (waypoints[w+1][1] - waypoints[w-1][1]) * 0.5;
+            }
+        }
+
+        // Varier l'amplitude des tangentes pour explorer differentes rondeurs
+        for (double tangentScale : new double [] {0.3, 0.6, 1.0, 1.5, 2.0})
+        {
+            for (int v = 0; v < 2; v++)
+            {
+                // Calculer la longueur totale de la spline (approximation par echantillonnage)
+                int samplesPerSeg = 20;
+                double totalLen = 0.0;
+                double [] cumLen = new double [samplesPerSeg * (nWp - 1) + 1];
+                double [] sampX = new double [cumLen.length];
+                double [] sampY = new double [cumLen.length];
+                int idx = 0;
+                for (int seg = 0; seg < nWp - 1; seg++)
+                {
+                    for (int k = 0; k < samplesPerSeg; k++)
+                    {
+                        double t = (double) k / samplesPerSeg;
+                        double [] pt = hermitePoint (waypoints[seg], waypoints[seg+1],
+                                tangents[seg], tangents[seg+1], tangentScale, t);
+                        sampX[idx] = pt[0];
+                        sampY[idx] = pt[1];
+                        if (idx > 0)
+                            totalLen += Math.hypot (sampX[idx] - sampX[idx-1],
+                                                    sampY[idx] - sampY[idx-1]);
+                        cumLen[idx] = totalLen;
+                        idx++;
+                    }
+                }
+                // Dernier point
+                sampX[idx] = waypoints[nWp-1][0];
+                sampY[idx] = waypoints[nWp-1][1];
+                if (idx > 0)
+                    totalLen += Math.hypot (sampX[idx] - sampX[idx-1],
+                                            sampY[idx] - sampY[idx-1]);
+                cumLen[idx] = totalLen;
+                idx++;
+                int totalSamples = idx;
+
+                if (totalLen < 1e-9) continue;
+
+                // Echantillonner nCP CPs a intervalles d'arc-length uniformes
+                double [] p = new double [d];
+                for (int i = 0; i < nCP; i++)
+                {
+                    double target = ((double) (i + 1) / (nCP + 1)) * totalLen;
+                    int si = 1;
+                    while (si < totalSamples && cumLen[si] < target) si++;
+                    si = Math.max (1, Math.min (si, totalSamples - 1));
+                    double denom = Math.max (1e-9, cumLen[si] - cumLen[si-1]);
+                    double a = (target - cumLen[si-1]) / denom;
+                    double noise = (v == 0) ? 0.0 : rng.nextGaussian () * 1.5;
+                    p[2 * i] = (1.0 - a) * sampX[si-1] + a * sampX[si] + noise;
+                    p[2 * i + 1] = (1.0 - a) * sampY[si-1] + a * sampY[si] + noise;
+                }
+                repelControlPointsFromObstacles (p, 2);
+                addSeed (seeds, fits, p);
+            }
+        }
+    }
+
+    /** Evaluation d'un point sur un segment de spline Hermite cubique. */
+    private static double [] hermitePoint (double [] p0, double [] p1,
+                                            double [] m0, double [] m1,
+                                            double scale, double t)
+    {
+        double t2 = t * t;
+        double t3 = t2 * t;
+        double h00 = 2*t3 - 3*t2 + 1;
+        double h10 = t3 - 2*t2 + t;
+        double h01 = -2*t3 + 3*t2;
+        double h11 = t3 - t2;
+        return new double [] {
+            h00 * p0[0] + h10 * m0[0] * scale + h01 * p1[0] + h11 * m1[0] * scale,
+            h00 * p0[1] + h10 * m0[1] * scale + h01 * p1[1] + h11 * m1[1] * scale
+        };
     }
 
     /**
@@ -844,7 +1114,14 @@ public class OptiPath extends CompetitorProject
     private void addGridPlannerSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
                                       double sx, double sy, double ex, double ey)
     {
-        int grid = Math.max (28, Math.min (56, 24 + nObs));
+        // Resolution adaptative : plus fine quand les gaps entre obstacles sont etroits
+        double minGap = estimateMinGap ();
+        double domainSize = Math.max (problem.getMaxX () - problem.getMinX (),
+                                       problem.getMaxY () - problem.getMinY ());
+        int adaptiveGrid = (minGap > 0.5)
+                ? (int) (domainSize / minGap * 4)
+                : 24 + nObs;
+        int grid = Math.max (40, Math.min (80, adaptiveGrid));
         double minX = problem.getMinX (), maxX = problem.getMaxX ();
         double minY = problem.getMinY (), maxY = problem.getMaxY ();
         double stepX = (maxX - minX) / Math.max (1, grid - 1);
@@ -987,6 +1264,37 @@ public class OptiPath extends CompetitorProject
             repelControlPointsFromObstacles (q, 1);
             addSeed (seeds, fits, q);
         }
+
+        // Variante A* avec spline Hermite : detecter les virages dans le path A*
+        // et utiliser la meme strategie de spline lisse
+        if (path.size () >= 4)
+        {
+            // Simplifier le path A* en waypoints (start, virages significatifs, end)
+            ArrayList<double []> keyPoints = new ArrayList<> ();
+            keyPoints.add (path.get (0));
+            for (int i = 1; i < path.size () - 1; i++)
+            {
+                double ax = path.get(i)[0] - path.get(i-1)[0];
+                double ay = path.get(i)[1] - path.get(i-1)[1];
+                double bx = path.get(i+1)[0] - path.get(i)[0];
+                double by = path.get(i+1)[1] - path.get(i)[1];
+                double magA = Math.hypot (ax, ay);
+                double magB = Math.hypot (bx, by);
+                if (magA > 1e-9 && magB > 1e-9)
+                {
+                    double cos = (ax * bx + ay * by) / (magA * magB);
+                    if (cos < 0.85) // virage significatif (> ~30 deg)
+                        keyPoints.add (path.get (i));
+                }
+            }
+            keyPoints.add (path.get (path.size () - 1));
+
+            if (keyPoints.size () >= 3)
+            {
+                double [][] kpArr = keyPoints.toArray (new double [0][]);
+                addHermiteSplineSeeds (seeds, fits, kpArr);
+            }
+        }
     }
 
     private static double heuristic (int x, int y, int tx, int ty)
@@ -997,6 +1305,31 @@ public class OptiPath extends CompetitorProject
     // ================================================================
     //  Helpers
     // ================================================================
+
+    /**
+     * Estime le plus petit gap entre obstacles proches.
+     * Retourne la distance minimale bord-a-bord entre paires d'obstacles
+     * dont les centres sont a moins de 2*(r1+r2) l'un de l'autre.
+     */
+    private double estimateMinGap ()
+    {
+        double minGap = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < nObs; i++)
+        {
+            for (int j = i + 1; j < nObs; j++)
+            {
+                double dist = Math.hypot (obsX[i] - obsX[j], obsY[i] - obsY[j]);
+                double sumR = obsR[i] + obsR[j];
+                // Ne considerer que les obstacles "proches" (potentiellement un mur)
+                if (dist < 2.0 * sumR)
+                {
+                    double gap = dist - sumR;
+                    if (gap > 0 && gap < minGap) minGap = gap;
+                }
+            }
+        }
+        return Double.isFinite (minGap) ? minGap : 0.0;
+    }
 
     private double [] makePath (double x, double y)
     { double[]p=new double[d]; for(int i=0;i<nCP;i++){p[2*i]=x;p[2*i+1]=y;} return p; }
@@ -1014,6 +1347,7 @@ public class OptiPath extends CompetitorProject
         boolean stalled = (now - lastGlobalImproveMs) > 7_000L;
         if (!noFeasible && !stalled) return;
         long period = noFeasible ? 900L : RESCUE_PERIOD_MS;
+        if (pathComplexity > 1.5) period = (long) (period / pathComplexity);
         if (lastRescueBurstMs != 0L && now - lastRescueBurstMs < period) return;
 
         double [] base = bestFeasibleX != null ? bestFeasibleX
@@ -1021,26 +1355,39 @@ public class OptiPath extends CompetitorProject
         long elapsed = now - startTime;
         int tries = noFeasible ? 220 : RESCUE_BURST_TRIES;
         if (noFeasible && elapsed > 25_000L) tries = 600;
+        // Adapter le nombre de tries a la complexite du probleme
+        if (pathComplexity > 1.3)
+            tries = (int) (tries * pathComplexity);
 
         for (int k = 0; k < tries; k++)
         {
-            double [] p = base.clone ();
-            double noise = domainDiag * (0.02 + 0.22 * (k / (double) Math.max (1, tries)));
+            double [] p;
 
-            for (int i = 0; i < d; i++)
-                p[i] += rng.nextGaussian () * noise;
-
-            // Diversification structurelle: lignes de niveau pour forcer des passages differents.
-            if ((k % 7) == 0)
+            // Rescue structure via waypoints detectes (1 sur 3)
+            if (detectedWaypoints != null && pathComplexity > 1.3 && (k % 3) == 1)
             {
-                double yy = problem.getMinY ()
-                        + rng.nextDouble () * (problem.getMaxY () - problem.getMinY ());
-                for (int i = 0; i < nCP; i++)
+                p = generateWaypointRescueSeed ();
+            }
+            else
+            {
+                p = base.clone ();
+                double noise = domainDiag * (0.02 + 0.22 * (k / (double) Math.max (1, tries)));
+
+                for (int i = 0; i < d; i++)
+                    p[i] += rng.nextGaussian () * noise;
+
+                // Diversification structurelle: lignes de niveau pour forcer des passages differents.
+                if ((k % 7) == 0)
                 {
-                    double t = (double) (i + 1) / (nCP + 1);
-                    p[2 * i] = problem.getStartPoint ().getX ()
-                            + t * (problem.getEndPoint ().getX () - problem.getStartPoint ().getX ());
-                    p[2 * i + 1] = yy;
+                    double yy = problem.getMinY ()
+                            + rng.nextDouble () * (problem.getMaxY () - problem.getMinY ());
+                    for (int i = 0; i < nCP; i++)
+                    {
+                        double t = (double) (i + 1) / (nCP + 1);
+                        p[2 * i] = problem.getStartPoint ().getX ()
+                                + t * (problem.getEndPoint ().getX () - problem.getStartPoint ().getX ());
+                        p[2 * i + 1] = yy;
+                    }
                 }
             }
 
@@ -1051,6 +1398,48 @@ public class OptiPath extends CompetitorProject
                 break;
         }
         lastRescueBurstMs = now;
+    }
+
+    /**
+     * Genere un seed structure a partir des waypoints detectes.
+     * Alterne entre clustering aux virages et spline lisse avec bruit modere.
+     */
+    private double [] generateWaypointRescueSeed ()
+    {
+        double [] p = new double [d];
+        int nWp = detectedWaypoints.length;
+
+        // Calculer longueurs des segments
+        double totalLen = 0.0;
+        double [] cumLen = new double [nWp];
+        cumLen[0] = 0.0;
+        for (int s = 1; s < nWp; s++)
+        {
+            cumLen[s] = cumLen[s-1] + Math.hypot (
+                    detectedWaypoints[s][0] - detectedWaypoints[s-1][0],
+                    detectedWaypoints[s][1] - detectedWaypoints[s-1][1]);
+        }
+        totalLen = cumLen[nWp - 1];
+        if (totalLen < 1e-9) return defaultMean ();
+
+        // Placer les CPs par interpolation le long des waypoints avec bruit
+        double noiseScale = domainDiag * (0.02 + rng.nextDouble () * 0.08);
+        for (int i = 0; i < nCP; i++)
+        {
+            double target = ((double) (i + 1) / (nCP + 1)) * totalLen;
+            int seg = 1;
+            while (seg < nWp && cumLen[seg] < target) seg++;
+            seg = Math.max (1, Math.min (seg, nWp - 1));
+            double denom = Math.max (1e-9, cumLen[seg] - cumLen[seg-1]);
+            double a = (target - cumLen[seg-1]) / denom;
+            p[2 * i] = (1.0 - a) * detectedWaypoints[seg-1][0]
+                    + a * detectedWaypoints[seg][0]
+                    + rng.nextGaussian () * noiseScale;
+            p[2 * i + 1] = (1.0 - a) * detectedWaypoints[seg-1][1]
+                    + a * detectedWaypoints[seg][1]
+                    + rng.nextGaussian () * noiseScale;
+        }
+        return p;
     }
 
     private void maybeRefineElite ()
