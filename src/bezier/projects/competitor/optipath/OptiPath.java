@@ -1347,7 +1347,7 @@ public class OptiPath extends CompetitorProject
         boolean stalled = (now - lastGlobalImproveMs) > 7_000L;
         if (!noFeasible && !stalled) return;
         long period = noFeasible ? 900L : RESCUE_PERIOD_MS;
-        if (pathComplexity > 1.5) period = (long) (period / pathComplexity);
+        if (pathComplexity > 1.5) period = (long) (period / Math.min (pathComplexity, 2.0));
         if (lastRescueBurstMs != 0L && now - lastRescueBurstMs < period) return;
 
         double [] base = bestFeasibleX != null ? bestFeasibleX
@@ -1355,9 +1355,9 @@ public class OptiPath extends CompetitorProject
         long elapsed = now - startTime;
         int tries = noFeasible ? 220 : RESCUE_BURST_TRIES;
         if (noFeasible && elapsed > 25_000L) tries = 600;
-        // Adapter le nombre de tries a la complexite du probleme
+        // Adapter le nombre de tries a la complexite du probleme (cap a 2x)
         if (pathComplexity > 1.3)
-            tries = (int) (tries * pathComplexity);
+            tries = (int) (tries * Math.min (pathComplexity, 2.0));
 
         for (int k = 0; k < tries; k++)
         {

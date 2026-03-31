@@ -41,8 +41,8 @@ public final class Main extends OutputWriter {
 
 	private static final String LOG_FILE = "bezier.log";
 	private static final int AWAIT = 1;
-	// private static final int NB_RUNS = 10;
-	private static final int NB_RUNS = 3;
+	private static final int NB_RUNS = 10;
+	//private static final int NB_RUNS = 3;
 	private static final int NB_SECONDS = 60;
 	// private static final int NB_SECONDS = 10;
 	public static final boolean DISPLAY_CHART = true;
@@ -54,7 +54,7 @@ public final class Main extends OutputWriter {
 
 	// ====== CHOIX DES PROBLEMES A LANCER ======
 	// Mettre les numeros des probs voulus (ex: {4} pour prob4 seul, {1,2,3,4,5,6,7} pour tous)
-	private static final int[] SELECTED_PROBLEMS = {1,2,3,4,5,7};
+	private static final int[] SELECTED_PROBLEMS = {4,5,7};
 
 	/**
 	 * @return Retourne l'instance de Main
