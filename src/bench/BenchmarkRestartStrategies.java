@@ -15,11 +15,11 @@ import java.util.Map;
 /**
  * Benchmark des strategies de restart externe pour OptiPath.
  *
- * Compare les 9 strategies (T0-T8) sur les 4 problemes.
+ * Compare les strategies (T0-T14) sur les 4 problemes.
  * Resultats dans results/bench_restart_strategies.csv
  *
  * Usage :
- *   java -cp "lib/*:bin" bench.BenchmarkRestartStrategies [--seconds N] [--runs N] [--reset]
+ *   java -cp "lib/*:bin" bench.BenchmarkRestartStrategies [--seconds N] [--runs N] [--reset] [--only NAME]
  */
 public class BenchmarkRestartStrategies
 {
@@ -30,11 +30,14 @@ public class BenchmarkRestartStrategies
     private static final String [] STRATEGY_NAMES =
             {"T0_Legacy", "T1_RelativeImprv", "T2_SeedCalibrated",
              "T3_Percentile", "T4_TimeSlice", "T5_GatedSlice",
-             "T6_SigmaCollapse", "T7_PortfolioAgrmt", "T8_Hybrid"};
+             "T6_SigmaCollapse", "T7_PortfolioAgrmt", "T8_Hybrid",
+             "T9_SpectralPlateau", "T10_OccEntropy", "T11_CurvePersist",
+             "T12_BayesCred", "T13_StepFrustr", "T14_TimePhasedFocus"};
 
     public static void main (String [] args) throws Exception
     {
         boolean reset = false;
+        String onlyStrategy = null;
 
         for (int i = 0; i < args.length; i++)
         {
@@ -44,6 +47,16 @@ public class BenchmarkRestartStrategies
                 NB_RUNS = Integer.parseInt (args [++i]);
             else if (args [i].equals ("--reset"))
                 reset = true;
+            else if (args [i].equals ("--only") && i + 1 < args.length)
+                onlyStrategy = args [++i];
+        }
+
+        String [] strategyNames = STRATEGY_NAMES;
+        if (onlyStrategy != null)
+        {
+            if (indexOf (STRATEGY_NAMES, onlyStrategy) < 0)
+                throw new IllegalArgumentException ("Strategie inconnue: " + onlyStrategy);
+            strategyNames = new String[]{onlyStrategy};
         }
 
         Problem.headless = true;
@@ -92,22 +105,22 @@ public class BenchmarkRestartStrategies
             probNames [i] = problems.get (i).getName ();
 
         @SuppressWarnings ("unchecked")
-        ArrayList<Double> [][] scores = new ArrayList [STRATEGY_NAMES.length][problems.size ()];
-        for (int s = 0; s < STRATEGY_NAMES.length; s++)
+        ArrayList<Double> [][] scores = new ArrayList [strategyNames.length][problems.size ()];
+        for (int s = 0; s < strategyNames.length; s++)
             for (int p = 0; p < problems.size (); p++)
                 scores [s][p] = new ArrayList<> ();
 
         for (Map.Entry<String, Double> entry : existing.entrySet ())
         {
             String [] parts = entry.getKey ().split (",");
-            int s = indexOf (STRATEGY_NAMES, parts [0]);
+            int s = indexOf (strategyNames, parts [0]);
             int p = indexOf (probNames, parts [1]);
             if (s >= 0 && p >= 0)
                 scores [s][p].add (entry.getValue ());
         }
 
         int totalMissing = 0;
-        for (int s = 0; s < STRATEGY_NAMES.length; s++)
+        for (int s = 0; s < strategyNames.length; s++)
             for (int p = 0; p < problems.size (); p++)
                 totalMissing += Math.max (0, NB_RUNS - scores [s][p].size ());
 
@@ -115,14 +128,14 @@ public class BenchmarkRestartStrategies
         if (totalMissing == 0)
         {
             System.err.println ("Tout est deja complet.");
-            printSummary (scores, probNames);
+            printSummary (scores, probNames, strategyNames);
             return;
         }
         System.err.println (totalMissing + " run(s) restant(s).");
         System.err.println ();
 
         // --- Executer ---
-        for (int s = 0; s < STRATEGY_NAMES.length; s++)
+        for (int s = 0; s < strategyNames.length; s++)
         {
             for (int p = 0; p < problems.size (); p++)
             {
@@ -131,14 +144,14 @@ public class BenchmarkRestartStrategies
 
                 for (int run = alreadyDone + 1; run <= NB_RUNS; run++)
                 {
-                    System.err.print (STRATEGY_NAMES [s] + " / " + problem.getName ()
+                        System.err.print (strategyNames [s] + " / " + problem.getName ()
                             + " / run " + run + " ... ");
 
                     problem.reset ();
 
                     try
                     {
-                        OuterRestartStrategy strategy = createStrategy (STRATEGY_NAMES [s]);
+                        OuterRestartStrategy strategy = createStrategy (strategyNames [s]);
                         CompetitorProject project = new OptiPath (problem, strategy);
 
                         project.initialization ();
@@ -154,7 +167,7 @@ public class BenchmarkRestartStrategies
 
                         try (PrintWriter pw = new PrintWriter (new FileWriter (csvFile, true)))
                         {
-                            pw.println (STRATEGY_NAMES [s] + "," + problem.getName ()
+                            pw.println (strategyNames [s] + "," + problem.getName ()
                                     + "," + run + "," + score);
                         }
                     }
@@ -167,7 +180,7 @@ public class BenchmarkRestartStrategies
             }
         }
 
-        printSummary (scores, probNames);
+        printSummary (scores, probNames, strategyNames);
         System.err.println ("=== Benchmark termine. Resultats dans " + CSV_PATH + " ===");
     }
 
@@ -184,11 +197,18 @@ public class BenchmarkRestartStrategies
             case "T6_SigmaCollapse":   return new SigmaCollapseRestart ();
             case "T7_PortfolioAgrmt":  return new PortfolioAgreementRestart ();
             case "T8_Hybrid":          return new HybridMultiSignalRestart ();
+            case "T9_SpectralPlateau": return new SpectralPlateauRestart ();
+            case "T10_OccEntropy":     return new OccupancyEntropyRestart ();
+            case "T11_CurvePersist":   return new CurveShapePersistenceRestart ();
+            case "T12_BayesCred":      return new BayesianCredibilityRestart ();
+            case "T13_StepFrustr":     return new StepFrustrationRestart ();
+            case "T14_TimePhasedFocus": return new TimePhasedFocusRestart ();
             default:                   return new LegacyThresholdRestart ();
         }
     }
 
-    private static void printSummary (ArrayList<Double> [][] scores, String [] probNames)
+    private static void printSummary (ArrayList<Double> [][] scores, String [] probNames,
+                                      String [] strategyNames)
     {
         System.out.println ();
         System.out.println ("=== RESULTATS : Mean (Best / Worst) ===");
@@ -210,10 +230,10 @@ public class BenchmarkRestartStrategies
         System.out.println (sep);
 
         // Rows
-        for (int s = 0; s < STRATEGY_NAMES.length; s++)
+        for (int s = 0; s < strategyNames.length; s++)
         {
             StringBuilder row = new StringBuilder ();
-            row.append (String.format ("%-20s", STRATEGY_NAMES [s]));
+            row.append (String.format ("%-20s", strategyNames [s]));
             double totalMean = 0;
             int totalCount = 0;
 

@@ -1,0 +1,119 @@
+\babel@toc {french}{}\relax 
+\thispagestyle {empty}
+\contentsline {section}{Synthèse exécutive}{1}{Doc-Start}%
+\contentsline {paragraph}{Phase exploratoire.}{1}{Doc-Start}%
+\contentsline {paragraph}{Résultats de la phase exploratoire.}{1}{Doc-Start}%
+\contentsline {paragraph}{Algorithme final : OptiPath.}{1}{Doc-Start}%
+\contentsline {paragraph}{Résultats finaux (moyenne sur 10~exécutions).}{1}{Item.3}%
+\contentsline {section}{\numberline {1}Introduction}{1}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Contexte général}{1}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Cadre du projet}{1}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Objectifs et contributions}{2}{subsection.1.3}%
+\contentsline {subsection}{\numberline {1.4}Plan du rapport}{2}{subsection.1.4}%
+\contentsline {section}{\numberline {2}État de l'art}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Approches classiques et déterministes}{2}{subsection.2.1}%
+\contentsline {subsubsection}{\numberline {2.1.1}Planification sur grille et graphes}{2}{subsubsection.2.1.1}%
+\contentsline {subsubsection}{\numberline {2.1.2}Champs de potentiel artificiels}{3}{subsubsection.2.1.2}%
+\contentsline {subsection}{\numberline {2.2}Optimisation continue et métaheuristiques}{3}{subsection.2.2}%
+\contentsline {subsubsection}{\numberline {2.2.1}Méthodes basées sur le gradient}{3}{subsubsection.2.2.1}%
+\contentsline {subsubsection}{\numberline {2.2.2}Métaheuristiques à population}{3}{subsubsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.3}Approches par courbes paramétriques}{3}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Synthèse et positionnement}{4}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Problème étudié et modèle de trajectoire}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Courbes de Bézier}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Encodage des variables de décision}{4}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Fonction de coût}{4}{subsection.3.3}%
+\contentsline {paragraph}{Longueur $L$.}{4}{equation.2}%
+\contentsline {paragraph}{Pénalité d'obstacle $P_{\text {obs}}$.}{5}{equation.2}%
+\contentsline {paragraph}{Pénalité de courbure $P_{\text {courb}}$.}{5}{equation.2}%
+\contentsline {paragraph}{Pénalité de sortie $P_{\text {bord}}$.}{5}{equation.2}%
+\contentsline {subsection}{\numberline {3.4}Description des instances}{5}{subsection.3.4}%
+\contentsline {section}{\numberline {4}Méthodes d'optimisation retenues}{5}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Évolution différentielle (DE)}{6}{subsection.4.1}%
+\contentsline {subsubsection}{\numberline {4.1.1}Principe}{6}{subsubsection.4.1.1}%
+\contentsline {subsubsection}{\numberline {4.1.2}Mutation}{6}{subsubsection.4.1.2}%
+\contentsline {subsubsection}{\numberline {4.1.3}Croisement binomial}{6}{subsubsection.4.1.3}%
+\contentsline {subsubsection}{\numberline {4.1.4}Sélection gloutonne}{6}{subsubsection.4.1.4}%
+\contentsline {subsubsection}{\numberline {4.1.5}Auto-adaptation jDE}{6}{subsubsection.4.1.5}%
+\contentsline {subsubsection}{\numberline {4.1.6}Recherche locale hybride}{6}{subsubsection.4.1.6}%
+\contentsline {paragraph}{Paramètres retenus.}{6}{subsubsection.4.1.6}%
+\contentsline {subsection}{\numberline {4.2}CMA-ES (\emph {Covariance Matrix Adaptation — Evolution Strategy})}{6}{subsection.4.2}%
+\contentsline {subsubsection}{\numberline {4.2.1}Principe}{6}{subsubsection.4.2.1}%
+\contentsline {subsubsection}{\numberline {4.2.2}Échantillonnage}{7}{subsubsection.4.2.2}%
+\contentsline {subsubsection}{\numberline {4.2.3}Mise à jour du centroïde}{7}{subsubsection.4.2.3}%
+\contentsline {subsubsection}{\numberline {4.2.4}Chemins d'évolution cumulatifs}{7}{subsubsection.4.2.4}%
+\contentsline {subsubsection}{\numberline {4.2.5}Adaptation du pas $\sigma $ (CSA)}{7}{subsubsection.4.2.5}%
+\contentsline {subsubsection}{\numberline {4.2.6}Adaptation de la matrice de covariance $\mathbf {C}$}{7}{subsubsection.4.2.6}%
+\contentsline {subsection}{\numberline {4.3}Optimisation par essaim particulaire (PSO)}{8}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}Principe}{8}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}Mise à jour de la vitesse et de la position}{8}{subsubsection.4.3.2}%
+\contentsline {subsubsection}{\numberline {4.3.3}Gestion de l'inertie et mécanisme anti-stagnation}{8}{subsubsection.4.3.3}%
+\contentsline {paragraph}{Paramètres retenus.}{8}{subsubsection.4.3.3}%
+\contentsline {section}{\numberline {5}Implémentation détaillée de CMA-ES}{8}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Décomposition propre et gestion de la complexité}{8}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Seeding avancé}{8}{subsection.5.2}%
+\contentsline {subsubsection}{\numberline {5.2.1}Catégories de graines}{9}{subsubsection.5.2.1}%
+\contentsline {subsubsection}{\numberline {5.2.2}Sélection et optimisation locale des graines}{9}{subsubsection.5.2.2}%
+\contentsline {subsection}{\numberline {5.3}Stratégies de Restart (IPOP et BIPOP)}{9}{subsection.5.3}%
+\contentsline {paragraph}{IPOP (Increasing Population Size).}{9}{Item.15}%
+\contentsline {paragraph}{BIPOP (Bi-Population)~\cite {hansen2009}.}{9}{Item.15}%
+\contentsline {subsection}{\numberline {5.4}Gestion des bornes}{9}{subsection.5.4}%
+\contentsline {section}{\numberline {6}Méthodes explorées}{10}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Algorithme génétique réel (GA) — ligne de base}{10}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Variantes de l'évolution différentielle}{10}{subsection.6.2}%
+\contentsline {paragraph}{SHADE (\textit {Success-History based Adaptive DE})~\cite {tanabe2013}.}{10}{subsection.6.2}%
+\contentsline {paragraph}{L-SHADE (\textit {Linear Population Size Reduction})~\cite {tanabe2014}.}{10}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Variantes PSO}{10}{subsection.6.3}%
+\contentsline {paragraph}{CLPSO (\textit {Comprehensive Learning PSO}).}{10}{subsection.6.3}%
+\contentsline {paragraph}{FPSO (\textit {Fractional-Order PSO}).}{10}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Algorithmes d'intelligence en essaim}{10}{subsection.6.4}%
+\contentsline {paragraph}{GWO (\textit {Grey Wolf Optimizer}).}{10}{subsection.6.4}%
+\contentsline {paragraph}{FA (\textit {Firefly Algorithm}).}{10}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}Hybridation avec la planification discrète}{10}{subsection.6.5}%
+\contentsline {paragraph}{AStarSeeds.}{10}{subsection.6.5}%
+\contentsline {paragraph}{AStarRepair.}{11}{subsection.6.5}%
+\contentsline {subsection}{\numberline {6.6}Gestion avancée des contraintes}{11}{subsection.6.6}%
+\contentsline {paragraph}{ALConstraint (\textit {Augmented Lagrangian}).}{11}{subsection.6.6}%
+\contentsline {paragraph}{StochRank (\textit {Stochastic Ranking}).}{11}{subsection.6.6}%
+\contentsline {subsection}{\numberline {6.7}Autres variantes CMA-ES}{11}{subsection.6.7}%
+\contentsline {paragraph}{LMCMA (\textit {Limited Memory CMA-ES}).}{11}{subsection.6.7}%
+\contentsline {paragraph}{RFSurrogate (\textit {Random Forest Surrogate}).}{11}{subsection.6.7}%
+\contentsline {paragraph}{Islands, GridBIPOP, SepWarmup, MultiSegment.}{11}{subsection.6.7}%
+\contentsline {subsection}{\numberline {6.8}Bilan de l'exploration}{11}{subsection.6.8}%
+\contentsline {section}{\numberline {7}Protocole expérimental et résultats}{11}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Protocole expérimental}{11}{subsection.7.1}%
+\contentsline {paragraph}{Environnement matériel et logiciel.}{11}{subsection.7.1}%
+\contentsline {paragraph}{Protocole de mesure.}{11}{subsection.7.1}%
+\contentsline {paragraph}{Métriques.}{12}{Item.18}%
+\contentsline {subsection}{\numberline {7.2}Résultats quantitatifs}{12}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Visualisations des trajectoires optimales}{13}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}Solutions de référence (BKS)}{15}{subsection.7.4}%
+\contentsline {section}{\numberline {8}Analyse des résultats}{16}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Analyse statistique}{16}{subsection.8.1}%
+\contentsline {paragraph}{Test de Friedman.}{16}{subsection.8.1}%
+\contentsline {paragraph}{Comparaisons par paires (Wilcoxon).}{16}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Analyse qualitative par instance}{16}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}\texttt {prob1} — Trajectoire diagonale, 5~obstacles épars}{17}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}\texttt {prob2} — Contournement d'un gros obstacle ($r = 9$)}{17}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}\texttt {prob3} — Slalom entre trois murs verticaux}{18}{subsection.8.5}%
+\contentsline {subsection}{\numberline {8.6}\texttt {prob4} — Labyrinthe en S}{18}{subsection.8.6}%
+\contentsline {paragraph}{Exploitation de la vitesse paramétrique.}{18}{figure.caption.15}%
+\contentsline {paragraph}{Résultats.}{19}{figure.caption.15}%
+\contentsline {section}{\numberline {9}Algorithme final : OptiPath}{19}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Architecture générale}{19}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Phase 1 : Seeding massif}{19}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}Phase 2 : Portfolio CMA-ES à deux marges}{20}{subsection.9.3}%
+\contentsline {paragraph}{Marge 5 (small).}{20}{subsection.9.3}%
+\contentsline {paragraph}{Marge 15 (wide).}{20}{subsection.9.3}%
+\contentsline {paragraph}{Partage des évaluations.}{20}{subsection.9.3}%
+\contentsline {subsection}{\numberline {9.4}Restart adaptatif}{20}{subsection.9.4}%
+\contentsline {paragraph}{Principe.}{20}{subsection.9.4}%
+\contentsline {paragraph}{Analyse probabiliste.}{20}{subsection.9.4}%
+\contentsline {paragraph}{Impact sur les autres instances.}{20}{subsection.9.4}%
+\contentsline {subsection}{\numberline {9.5}Pseudocode}{21}{subsection.9.5}%
+\contentsline {subsection}{\numberline {9.6}Résultats finaux}{21}{subsection.9.6}%
+\contentsline {section}{\numberline {10}Conclusion}{21}{section.10}%
+\contentsline {paragraph}{Phase exploratoire.}{21}{section.10}%
+\contentsline {paragraph}{Algorithme final.}{22}{section.10}%
+\contentsline {paragraph}{Résultats.}{22}{section.10}%
+\contentsline {paragraph}{Enseignements.}{22}{section.10}%
