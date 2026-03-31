@@ -80,7 +80,7 @@ public class OptiPath extends CompetitorProject
 
     public OptiPath (Problem problem) throws InvalidProjectException
     {
-        this (problem, 5.0, 15.0, HybridMultiSignalRestart.v1 ());
+        this (problem, 5.0, 15.0, new TimePhasedFocusRestart ());
     }
 
     OptiPath (Problem problem, OuterRestartStrategy strategy)
