@@ -28,7 +28,7 @@ public class OptiPath extends CompetitorProject
     private static final long RESCUE_START_MS = 8_000;
     private static final long RESCUE_PERIOD_MS = 1_500;
     private static final int RESCUE_BURST_TRIES = 28;
-    private static final int FEASIBILITY_SAMPLES = 64;
+    private static final int FEASIBILITY_SAMPLES = 128;
 
     /** Fraction du temps pour le seeding initial. */
     private static final double SEED_RATIO = 0.10;
@@ -88,6 +88,8 @@ public class OptiPath extends CompetitorProject
     private double [][] detectedWaypoints;
     /** Ratio longueur_waypoints / distance_directe (1.0 = ligne droite). */
     private double pathComplexity;
+    /** Seed A* garde comme fallback garanti pour les restarts. */
+    private double [] aStarSeed;
 
     // Seeding : top seeds + optim locale
     private ArrayList<double []> topSeeds;
@@ -145,6 +147,7 @@ public class OptiPath extends CompetitorProject
         lastRefineMs = 0L;
         detectedWaypoints = null;
         pathComplexity = 1.0;
+        aStarSeed = null;
 
         nCP = problem.getNControlPoints ();
         d = 2 * nCP;
@@ -364,6 +367,19 @@ public class OptiPath extends CompetitorProject
         if (lastRestartCheckMs != 0L && (now - lastRestartCheckMs) < RESTART_CHECK_EVERY_MS)
             return;
 
+        // Filet de securite : si apres 30s le score est encore tres mauvais,
+        // forcer un restart depuis le seed A*
+        long elapsed = now - startTime;
+        if (aStarSeed != null && elapsed > 30_000L
+                && bestFeasibleFitness > 2.0 * domainDiag)
+        {
+            globalBestX = aStarSeed.clone ();
+            restartCount++;
+            restartStrategy.onRestart ();
+            launchBothCMAES ();
+            return;
+        }
+
         OptimizerState sState = cmaesSmall.getState ();
         OptimizerState wState = cmaesWide.getState ();
 
@@ -580,6 +596,18 @@ public class OptiPath extends CompetitorProject
             return p;
         }
 
+        // Fallback A* : quand la qualite globale est mauvaise, utiliser le seed A*
+        if (aStarSeed != null && (basinBest > 3.0 * domainDiag
+                || (bestFeasibleX == null && restartCount > 2)))
+        {
+            double [] p = aStarSeed.clone ();
+            double noise = domainDiag * 0.015;
+            for (int i = 0; i < d; i++)
+                p[i] += rng.nextGaussian () * noise;
+            clamp (p);
+            return p;
+        }
+
         // 1 restart sur 2 : repartir pres du meilleur resultat global
         if (restartCount % 2 == 1 && anchorBest != null)
         {
@@ -629,13 +657,22 @@ public class OptiPath extends CompetitorProject
             ox[i] = o.getX (); oy[i] = o.getY (); or_[i] = o.getRadius ();
         }
 
-        // Detecter murs verticaux (obstacles groupes par x)
-        ArrayList<double []> walls = detectWalls (ox, oy, or_, nObs, true);
-        boolean vertical = !walls.isEmpty ();
+        // Detecter murs verticaux ET horizontaux, garder la meilleure orientation
+        ArrayList<double []> vWalls = detectWalls (ox, oy, or_, nObs, true);
+        ArrayList<double []> hWalls = detectWalls (oy, ox, or_, nObs, false);
+        boolean vertical = vWalls.size () >= hWalls.size ();
+        ArrayList<double []> walls = vertical ? vWalls : hWalls;
 
-        // Si pas de murs verticaux, essayer horizontaux
-        if (!vertical)
-            walls = detectWalls (oy, ox, or_, nObs, false);
+        // Si les deux orientations ont des murs, utiliser celle qui couvre le plus
+        // de la trajectoire start→end (mesure par projection sur l'axe principal)
+        if (!vWalls.isEmpty () && !hWalls.isEmpty ())
+        {
+            double dxPath = Math.abs (ex - sx);
+            double dyPath = Math.abs (ey - sy);
+            vertical = (dxPath >= dyPath) ? (vWalls.size () >= hWalls.size ())
+                                          : (vWalls.size () > hWalls.size ());
+            walls = vertical ? vWalls : hWalls;
+        }
 
         if (walls.isEmpty ()) return;
 
@@ -1252,16 +1289,18 @@ public class OptiPath extends CompetitorProject
             p[2 * i] = x;
             p[2 * i + 1] = y;
         }
+        repelControlPointsFromObstacles (p, 3);
+        this.aStarSeed = p.clone ();
         addSeed (seeds, fits, p);
 
         // Variantes legeres autour de la trajectoire A*.
-        for (int v = 0; v < 8; v++)
+        for (int v = 0; v < 12; v++)
         {
             double [] q = p.clone ();
-            double noise = domainDiag * (0.006 + 0.004 * v);
+            double noise = domainDiag * (0.004 + 0.003 * v);
             for (int i = 0; i < d; i++)
                 q[i] += rng.nextGaussian () * noise;
-            repelControlPointsFromObstacles (q, 1);
+            repelControlPointsFromObstacles (q, 3);
             addSeed (seeds, fits, q);
         }
 
@@ -1341,11 +1380,16 @@ public class OptiPath extends CompetitorProject
     {
         long now = System.currentTimeMillis ();
         if (!cmaesReady) return;
-        if (now - startTime < RESCUE_START_MS) return;
+        // Demarrer le rescue plus tot quand le probleme est complexe
+        long rescueStart = (pathComplexity > 1.5) ? RESCUE_START_MS / 2 : RESCUE_START_MS;
+        if (now - startTime < rescueStart) return;
 
         boolean noFeasible = (bestFeasibleX == null);
-        boolean stalled = (now - lastGlobalImproveMs) > 7_000L;
-        if (!noFeasible && !stalled) return;
+        boolean stalled = (now - lastGlobalImproveMs) > 5_000L;
+        // Aussi considerer comme stalled si la meilleure solution faisable a un score
+        // bien pire que la longueur estimee du chemin (penalites probables)
+        boolean poorQuality = (bestFeasibleFitness > 3.0 * domainDiag);
+        if (!noFeasible && !stalled && !poorQuality) return;
         long period = noFeasible ? 900L : RESCUE_PERIOD_MS;
         if (pathComplexity > 1.5) period = (long) (period / Math.min (pathComplexity, 2.0));
         if (lastRescueBurstMs != 0L && now - lastRescueBurstMs < period) return;
