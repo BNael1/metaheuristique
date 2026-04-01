@@ -274,6 +274,9 @@ public class OptiPath extends CompetitorProject
         // 7. Obstacle-aware : detection de murs et routage par les gaps
         addObstacleAwareSeeds (allSeeds, allFitness, sx, sy, ex, ey);
 
+        // 7b. Detour seeds : contournement d'obstacles bloquant le chemin direct
+        addDetourSeeds (allSeeds, allFitness, sx, sy, ex, ey);
+
         // 8. Seed deterministe via A* sur grille (garde-fou anti-catastrophe)
         addGridPlannerSeeds (allSeeds, allFitness, sx, sy, ex, ey);
 
@@ -1054,6 +1057,157 @@ public class OptiPath extends CompetitorProject
             h00 * p0[0] + h10 * m0[0] * scale + h01 * p1[0] + h11 * m1[0] * scale,
             h00 * p0[1] + h10 * m0[1] * scale + h01 * p1[1] + h11 * m1[1] * scale
         };
+    }
+
+    /**
+     * Genere des seeds de contournement pour les obstacles qui bloquent le chemin direct.
+     * Fonctionne pour TOUTE configuration d'obstacles (y compris isolees, gros rayon, etc.).
+     * Strategie : detecter les obstacles sur le segment start→end, calculer des waypoints
+     * de contournement (passer au-dessus/en-dessous de chaque obstacle), puis interpoler les CPs.
+     */
+    private void addDetourSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
+                                  double sx, double sy, double ex, double ey)
+    {
+        if (nObs == 0) return;
+
+        // Trouver les obstacles qui intersectent le segment start→end
+        // (distance du centre au segment <= rayon + marge de securite)
+        double dx = ex - sx, dy = ey - sy;
+        double segLen = Math.hypot (dx, dy);
+        if (segLen < 1e-9) return;
+        double nx = -dy / segLen, ny = dx / segLen; // normale au segment
+
+        ArrayList<int[]> blocking = new ArrayList<> (); // [index, side] side: +1 ou -1
+        for (int i = 0; i < nObs; i++)
+        {
+            // Projection du centre obstacle sur le segment
+            double px = obsX[i] - sx, py = obsY[i] - sy;
+            double t = (px * dx + py * dy) / (segLen * segLen);
+            t = Math.max (0.0, Math.min (1.0, t));
+            double closestX = sx + t * dx, closestY = sy + t * dy;
+            double dist = Math.hypot (obsX[i] - closestX, obsY[i] - closestY);
+            if (dist < obsR[i] + 1.5) // obstacle bloque ou presque
+                blocking.add (new int [] {i});
+        }
+        if (blocking.isEmpty ()) return;
+
+        // Trier les obstacles bloquants par leur position le long du segment
+        blocking.sort ((a, b) -> {
+            double ta = ((obsX[a[0]] - sx) * dx + (obsY[a[0]] - sy) * dy) / (segLen * segLen);
+            double tb = ((obsX[b[0]] - sx) * dx + (obsY[b[0]] - sy) * dy) / (segLen * segLen);
+            return Double.compare (ta, tb);
+        });
+
+        // Pour chaque combinaison de cotes (passer a gauche ou a droite de chaque obstacle),
+        // generer un set de waypoints de contournement.
+        // Limiter a 2^min(nBlocking, 4) combinaisons pour eviter l'explosion.
+        int nBlock = blocking.size ();
+        int maxBits = Math.min (nBlock, 4);
+        int nCombos = 1 << maxBits;
+
+        for (int combo = 0; combo < nCombos; combo++)
+        {
+            // Construire les waypoints : start → detours → end
+            ArrayList<double []> waypoints = new ArrayList<> ();
+            waypoints.add (new double [] {sx, sy});
+
+            for (int b = 0; b < nBlock; b++)
+            {
+                int idx = blocking.get (b)[0];
+                int side = ((combo >> (b % maxBits)) & 1) == 0 ? 1 : -1;
+
+                // Point de contournement : centre obstacle + offset perpendiculaire
+                double clearance = obsR[idx] + 1.5; // passer hors de la soft zone
+                double wpX = obsX[idx] + side * nx * clearance;
+                double wpY = obsY[idx] + side * ny * clearance;
+
+                // Clamper dans le domaine
+                wpX = Math.max (problem.getMinX () + 0.5, Math.min (problem.getMaxX () - 0.5, wpX));
+                wpY = Math.max (problem.getMinY () + 0.5, Math.min (problem.getMaxY () - 0.5, wpY));
+
+                waypoints.add (new double [] {wpX, wpY});
+            }
+            waypoints.add (new double [] {ex, ey});
+
+            // Interpoler les CPs le long des waypoints
+            double totalDist = 0.0;
+            double [] segDists = new double [waypoints.size () - 1];
+            for (int s = 0; s < waypoints.size () - 1; s++)
+            {
+                segDists[s] = Math.hypot (waypoints.get(s+1)[0] - waypoints.get(s)[0],
+                                           waypoints.get(s+1)[1] - waypoints.get(s)[1]);
+                totalDist += segDists[s];
+            }
+            if (totalDist < 1e-9) continue;
+
+            double [] p = new double [d];
+            for (int i = 0; i < nCP; i++)
+            {
+                double t = (double)(i + 1) / (nCP + 1);
+                double target = t * totalDist;
+                double cumul = 0.0;
+                int seg = 0;
+                for (seg = 0; seg < segDists.length - 1; seg++)
+                {
+                    if (cumul + segDists[seg] >= target) break;
+                    cumul += segDists[seg];
+                }
+                double localT = (segDists[seg] > 1e-9) ? (target - cumul) / segDists[seg] : 0.5;
+                p[2*i]     = waypoints.get(seg)[0] + localT * (waypoints.get(seg+1)[0] - waypoints.get(seg)[0]);
+                p[2*i + 1] = waypoints.get(seg)[1] + localT * (waypoints.get(seg+1)[1] - waypoints.get(seg)[1]);
+            }
+            addSeed (seeds, fits, p);
+
+            // Variante avec overshoot (amplifier le contournement)
+            for (double overshoot : new double [] {1.3, 1.6, 2.0})
+            {
+                double [] q = new double [d];
+                for (int i = 0; i < nCP; i++)
+                {
+                    double t = (double)(i + 1) / (nCP + 1);
+                    double straightX = sx + t * dx;
+                    double straightY = sy + t * dy;
+                    q[2*i]     = straightX + (p[2*i] - straightX) * overshoot;
+                    q[2*i + 1] = straightY + (p[2*i+1] - straightY) * overshoot;
+                }
+                addSeed (seeds, fits, q);
+            }
+
+            // Variante avec bruit
+            for (int v = 0; v < 3; v++)
+            {
+                double [] q = p.clone ();
+                for (int i = 0; i < d; i++)
+                    q[i] += rng.nextGaussian () * 1.5;
+                addSeed (seeds, fits, q);
+            }
+        }
+
+        // Aussi stocker les waypoints du meilleur combo comme detectedWaypoints si pas deja set
+        if (detectedWaypoints == null && nBlock > 0)
+        {
+            // Utiliser combo 0 (tout d'un meme cote) comme reference
+            ArrayList<double []> wp0 = new ArrayList<> ();
+            wp0.add (new double [] {sx, sy});
+            for (int b = 0; b < nBlock; b++)
+            {
+                int idx = blocking.get (b)[0];
+                double clearance = obsR[idx] + 1.5;
+                double wpX = obsX[idx] + nx * clearance;
+                double wpY = obsY[idx] + ny * clearance;
+                wpX = Math.max (problem.getMinX () + 0.5, Math.min (problem.getMaxX () - 0.5, wpX));
+                wpY = Math.max (problem.getMinY () + 0.5, Math.min (problem.getMaxY () - 0.5, wpY));
+                wp0.add (new double [] {wpX, wpY});
+            }
+            wp0.add (new double [] {ex, ey});
+            this.detectedWaypoints = wp0.toArray (new double [0][]);
+            double directDist = Math.hypot (ex - sx, ey - sy);
+            double totalD = 0;
+            for (int s = 0; s < detectedWaypoints.length - 1; s++)
+                totalD += Math.hypot (detectedWaypoints[s+1][0] - detectedWaypoints[s][0],
+                                       detectedWaypoints[s+1][1] - detectedWaypoints[s][1]);
+            this.pathComplexity = (directDist > 1e-9) ? totalD / directDist : 1.0;
+        }
     }
 
     /**
