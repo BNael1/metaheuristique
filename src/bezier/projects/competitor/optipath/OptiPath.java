@@ -596,9 +596,10 @@ public class OptiPath extends CompetitorProject
             return p;
         }
 
-        // Fallback A* : quand la qualite globale est mauvaise, utiliser le seed A*
+        // Fallback A* : utiliser le seed A* regulierement et quand la qualite est mauvaise
         if (aStarSeed != null && (basinBest > 3.0 * domainDiag
-                || (bestFeasibleX == null && restartCount > 2)))
+                || (bestFeasibleX == null && restartCount > 2)
+                || (restartCount % 3 == 2)))
         {
             double [] p = aStarSeed.clone ();
             double noise = domainDiag * 0.015;
@@ -1491,9 +1492,12 @@ public class OptiPath extends CompetitorProject
         if (bestFeasibleX == null) return;
         long now = System.currentTimeMillis ();
         long elapsed = now - startTime;
-        if (elapsed < (long) (0.35 * TOTAL_TIME_MS)) return;
+        // Commencer le raffinement plus tot pour les problemes complexes
+        double refineStart = (pathComplexity > 1.5) ? 0.20 : 0.35;
+        if (elapsed < (long) (refineStart * TOTAL_TIME_MS)) return;
         if (lastRefineMs != 0L && now - lastRefineMs < 10L) return;
 
+        // Phase 1 : raffinement aleatoire classique
         int tries = (elapsed > (long) (0.75 * TOTAL_TIME_MS)) ? 4 : 2;
         double before = bestFeasibleFitness;
         for (int t = 0; t < tries; t++)
@@ -1510,6 +1514,28 @@ public class OptiPath extends CompetitorProject
             repelControlPointsFromObstacles (p, 1);
             clamp (p);
             evaluateAndTrack (p);
+        }
+
+        // Phase 2 : raffinement coordonnee par coordonnee (1 CP a la fois)
+        // Beaucoup plus efficace en haute dimension avec corridors etroits
+        if (elapsed > (long) (0.4 * TOTAL_TIME_MS))
+        {
+            int cp = rng.nextInt (nCP);
+            int ix = 2 * cp;
+            double step = refineSigma;
+            // Tester 8 directions + 2 tailles de pas
+            double [][] dirs = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+            for (double [] dir : dirs)
+            {
+                for (double scale : new double [] {step, step * 0.3})
+                {
+                    double [] p = bestFeasibleX.clone ();
+                    p[ix] += dir[0] * scale;
+                    p[ix + 1] += dir[1] * scale;
+                    clamp (p);
+                    evaluateAndTrack (p);
+                }
+            }
         }
 
         if (bestFeasibleFitness + 1e-9 < before)

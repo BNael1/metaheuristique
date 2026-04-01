@@ -41,8 +41,8 @@ public final class Main extends OutputWriter {
 
 	private static final String LOG_FILE = "bezier.log";
 	private static final int AWAIT = 1;
-	private static final int NB_RUNS = 10;
-	//private static final int NB_RUNS = 3;
+	//private static final int NB_RUNS = 10;
+	private static final int NB_RUNS = 3;
 	private static final int NB_SECONDS = 60;
 	// private static final int NB_SECONDS = 10;
 	public static final boolean DISPLAY_CHART = true;
