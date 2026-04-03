@@ -21,8 +21,8 @@ public class OptiPath extends CompetitorProject
     // ================================================================
     //  HYPERPARAMETRES
     // ================================================================
-    private final double marginSmall;
-    private final double marginWide;
+    private double marginSmall;
+    private double marginWide;
     private static final long TOTAL_TIME_MS = 58_000;
     private static final long RESTART_CHECK_EVERY_MS = 200;
     private static final long RESCUE_START_MS = 8_000;
@@ -162,6 +162,19 @@ public class OptiPath extends CompetitorProject
             obsY[i] = o.getY ();
             obsR[i] = o.getRadius ();
         }
+        // Adapter les marges : réduire pour petits domaines, garder >=5/15 sinon
+        double domSize = Math.max (problem.getMaxX () - problem.getMinX (),
+                                    problem.getMaxY () - problem.getMinY ());
+        if (domSize < 20.0)
+        {
+            marginSmall = Math.max (1.0, domSize * 0.20);
+            marginWide  = Math.max (2.0, domSize * 0.40);
+        }
+        else
+        {
+            marginSmall = 5.0;
+            marginWide  = 15.0;
+        }
         lbSmall = buildLb (marginSmall);
         ubSmall = buildUb (marginSmall);
         lbWide  = buildLb (marginWide);
@@ -199,6 +212,26 @@ public class OptiPath extends CompetitorProject
 
         ArrayList<double []> allSeeds = new ArrayList<> ();
         ArrayList<Double> allFitness = new ArrayList<> ();
+
+        // Fast-path : sans obstacles, le chemin optimal est la ligne droite
+        if (nObs == 0)
+        {
+            double [] straight = defaultMean ();
+            addSeed (allSeeds, allFitness, straight);
+            for (int r = 0; r < 15; r++)
+            {
+                double [] p = straight.clone ();
+                for (int i = 0; i < d; i++)
+                    p[i] += rng.nextGaussian () * domainDiag * (0.005 + 0.01 * r);
+                addSeed (allSeeds, allFitness, p);
+            }
+            topSeeds = new ArrayList<> ();
+            topSeeds.add (straight);
+            globalBestX = straight.clone ();
+            seedStats = new SeedingStats (allFitness.get (0), allFitness.get (0), 0.0, allFitness.get (0));
+            restartStrategy.init (seedStats);
+            return;
+        }
 
         double [] xVals = {lbWide[0], lbWide[0]+2, problem.getMinX (), problem.getMinX ()+2,
                            (problem.getMinX ()+problem.getMaxX ())/2,
@@ -678,6 +711,13 @@ public class OptiPath extends CompetitorProject
             walls = vertical ? vWalls : hWalls;
         }
 
+        // Si aucun mur V/H trouve, essayer la detection de murs diagonaux
+        if (walls.isEmpty ())
+        {
+            walls = detectDiagonalWalls (ox, oy, or_, nObs, sx, sy, ex, ey);
+            if (!walls.isEmpty ()) vertical = false; // flag special, traitement ci-dessous
+        }
+
         if (walls.isEmpty ()) return;
 
         // Trier les murs dans le sens start→end pour eviter les zigzags inverses.
@@ -700,12 +740,17 @@ public class OptiPath extends CompetitorProject
 
         for (int w = 0; w < walls.size (); w++)
         {
-            double wallPos = walls.get (w)[0];
-            double gapCenter = walls.get (w)[1];
-            if (vertical)
-            { waypoints[w + 1][0] = wallPos; waypoints[w + 1][1] = gapCenter; }
+            double [] wall = walls.get (w);
+            if (wall.length >= 5)
+            {
+                // Mur diagonal : coords absolues stockees en [3] et [4]
+                waypoints[w + 1][0] = wall[3];
+                waypoints[w + 1][1] = wall[4];
+            }
+            else if (vertical)
+            { waypoints[w + 1][0] = wall[0]; waypoints[w + 1][1] = wall[1]; }
             else
-            { waypoints[w + 1][0] = gapCenter; waypoints[w + 1][1] = wallPos; }
+            { waypoints[w + 1][0] = wall[1]; waypoints[w + 1][1] = wall[0]; }
         }
 
         // Calculer les distances entre waypoints
@@ -781,10 +826,45 @@ public class OptiPath extends CompetitorProject
         // Ca force la courbe Bezier a passer par les gaps car
         // si N CPs consecutifs sont au meme endroit, la courbe y passe.
         int nWalls = walls.size ();
-        if (nWalls > 0 && nCP >= nWalls)
+        if (nWalls > 0)
         {
+            // Si nCP < nWalls, selectionner les murs les plus critiques (gaps les plus etroits)
+            ArrayList<double []> activeWalls = walls;
+            double [][] activeWaypoints = waypoints;
+            if (nCP < nWalls)
+            {
+                activeWalls = new ArrayList<> (walls);
+                activeWalls.sort ((a, b) -> Double.compare (a[2], b[2])); // trier par taille de gap croissante
+                activeWalls = new ArrayList<> (activeWalls.subList (0, Math.min (nCP, activeWalls.size ())));
+                // Re-trier dans le sens start→end
+                if (vertical)
+                {
+                    if (ex >= sx) activeWalls.sort ((a, b) -> Double.compare (a[0], b[0]));
+                    else activeWalls.sort ((a, b) -> Double.compare (b[0], a[0]));
+                }
+                else
+                {
+                    if (ey >= sy) activeWalls.sort ((a, b) -> Double.compare (a[0], b[0]));
+                    else activeWalls.sort ((a, b) -> Double.compare (b[0], a[0]));
+                }
+                // Reconstruire les waypoints avec les murs actifs seulement
+                activeWaypoints = new double [activeWalls.size () + 2][2];
+                activeWaypoints[0][0] = sx; activeWaypoints[0][1] = sy;
+                activeWaypoints[activeWaypoints.length - 1][0] = ex;
+                activeWaypoints[activeWaypoints.length - 1][1] = ey;
+                for (int w = 0; w < activeWalls.size (); w++)
+                {
+                    double wallPos = activeWalls.get (w)[0];
+                    double gapCenter = activeWalls.get (w)[1];
+                    if (vertical)
+                    { activeWaypoints[w + 1][0] = wallPos; activeWaypoints[w + 1][1] = gapCenter; }
+                    else
+                    { activeWaypoints[w + 1][0] = gapCenter; activeWaypoints[w + 1][1] = wallPos; }
+                }
+            }
+
             // Repartir les CPs entre les segments waypoint
-            // Pour chaque gap, assigner ceil(nCP / (nWalls+1)) CPs
+            int nActiveWalls = activeWalls.size ();
             for (int v = 0; v < 10; v++)
             {
                 double [] p = new double [d];
@@ -792,14 +872,14 @@ public class OptiPath extends CompetitorProject
                 {
                     // Determiner a quel waypoint ce CP est le plus lie
                     double t = (double)(i + 1) / (nCP + 1);
-                    int wpIdx = (int) Math.round (t * (waypoints.length - 1));
-                    wpIdx = Math.max (0, Math.min (wpIdx, waypoints.length - 1));
+                    int wpIdx = (int) Math.round (t * (activeWaypoints.length - 1));
+                    wpIdx = Math.max (0, Math.min (wpIdx, activeWaypoints.length - 1));
 
-                    double targetX = waypoints[wpIdx][0];
-                    double targetY = waypoints[wpIdx][1];
+                    double targetX = activeWaypoints[wpIdx][0];
+                    double targetY = activeWaypoints[wpIdx][1];
 
                     // Petit offset en x pour que les CPs ne soient pas empiles
-                    double cpX = targetX + (t - (double) wpIdx / (waypoints.length - 1))
+                    double cpX = targetX + (t - (double) wpIdx / (activeWaypoints.length - 1))
                                            * (ex - sx) * 0.3;
 
                     double noise = (v == 0) ? 0.0 : rng.nextGaussian () * 2.0;
@@ -1293,10 +1373,163 @@ public class OptiPath extends CompetitorProject
                 if (sz > bestGapSize) { bestGapSize = sz; bestGapCenter = merged.get (merged.size () - 1)[1] + sz / 2.0; }
             }
 
-            walls.add (new double [] {wallPos, bestGapCenter});
+            walls.add (new double [] {wallPos, bestGapCenter, bestGapSize});
         }
 
         return walls;
+    }
+
+    /**
+     * Detecte les murs diagonaux : groupes de 3+ obstacles alignes sur un axe arbitraire.
+     * Retourne des pseudo-waypoints compatibles avec le pipeline obstacle-aware.
+     * Chaque entree : [projectionOnPath, gapCenterPerp, gapSize].
+     * Note : les waypoints sont deja en coordonnees (x,y) dans le tableau retourne,
+     * donc le code appelant doit utiliser walls[i][0]=x, walls[i][1]=y directement.
+     */
+    private ArrayList<double []> detectDiagonalWalls (double [] ox, double [] oy,
+                                                       double [] radii, int n,
+                                                       double sx, double sy,
+                                                       double ex, double ey)
+    {
+        ArrayList<double []> result = new ArrayList<> ();
+        if (n < 3) return result;
+
+        // Chercher des groupes de 3+ obstacles alignes selon un axe quelconque.
+        // Pour chaque paire (i,j), verifier combien d'autres obstacles sont proches de la ligne i-j.
+        double bestScore = 0;
+        ArrayList<Integer> bestGroup = null;
+        double bestAngle = 0;
+
+        boolean [] usedInBest = new boolean [n];
+
+        for (int i = 0; i < n && i < 30; i++) // limiter la complexite
+        {
+            for (int j = i + 1; j < n && j < 30; j++)
+            {
+                double dx = ox[j] - ox[i];
+                double dy = oy[j] - oy[i];
+                double len = Math.hypot (dx, dy);
+                if (len < 1e-9) continue;
+                double ux = dx / len, uy = dy / len; // direction du mur
+                double nx = -uy, ny = ux; // normale au mur
+
+                // Trouver tous les obstacles proches de cette ligne
+                ArrayList<Integer> group = new ArrayList<> ();
+                for (int k = 0; k < n; k++)
+                {
+                    double perpDist = Math.abs ((ox[k] - ox[i]) * nx + (oy[k] - oy[i]) * ny);
+                    double tol = Math.max (radii[k] * 1.5, 2.0);
+                    if (perpDist < tol) group.add (k);
+                }
+
+                if (group.size () >= 3 && group.size () > bestScore)
+                {
+                    bestScore = group.size ();
+                    bestGroup = group;
+                    bestAngle = Math.atan2 (uy, ux);
+                }
+            }
+        }
+
+        if (bestGroup == null || bestGroup.size () < 3) return result;
+
+        // Calculer le centre et la direction du mur
+        double cx = 0, cy = 0;
+        for (int idx : bestGroup) { cx += ox[idx]; cy += oy[idx]; }
+        cx /= bestGroup.size (); cy /= bestGroup.size ();
+
+        double ux = Math.cos (bestAngle), uy = Math.sin (bestAngle);
+        double nx = -uy, ny = ux; // normale
+
+        // Projeter les obstacles du groupe sur la direction du mur pour trouver l'etendue
+        double minProj = Double.POSITIVE_INFINITY, maxProj = Double.NEGATIVE_INFINITY;
+        for (int idx : bestGroup)
+        {
+            double proj = (ox[idx] - cx) * ux + (oy[idx] - cy) * uy;
+            minProj = Math.min (minProj, proj - radii[idx] - 1.0);
+            maxProj = Math.max (maxProj, proj + radii[idx] + 1.0);
+        }
+
+        // Trouver le gap dans la direction perpendiculaire a la trajectoire start→end
+        // On projette les obstacles sur la normale du mur et cherche le plus grand espace
+        double domMin = Math.min (
+                Math.min (problem.getMinX (), problem.getMinY ()),
+                Math.min (sx, ex)) - 2.0;
+        double domMax = Math.max (
+                Math.max (problem.getMaxX (), problem.getMaxY ()),
+                Math.max (sy, ey)) + 2.0;
+
+        // Projeter start et end sur la normale pour savoir de quel cote passer
+        double startPerp = (sx - cx) * nx + (sy - cy) * ny;
+        double endPerp = (ex - cx) * nx + (ey - cy) * ny;
+
+        // Calculer les intervalles bloques perpendiculairement au mur
+        ArrayList<double []> blocked = new ArrayList<> ();
+        for (int idx : bestGroup)
+        {
+            double perpProj = (ox[idx] - cx) * nx + (oy[idx] - cy) * ny;
+            blocked.add (new double [] {perpProj - radii[idx] - 1.0,
+                                         perpProj + radii[idx] + 1.0});
+        }
+        blocked.sort ((a, b) -> Double.compare (a[0], b[0]));
+
+        // Fusionner
+        ArrayList<double []> merged = new ArrayList<> ();
+        for (double [] iv : blocked)
+        {
+            if (!merged.isEmpty () && iv[0] <= merged.get (merged.size () - 1)[1])
+                merged.get (merged.size () - 1)[1] = Math.max (merged.get (merged.size () - 1)[1], iv[1]);
+            else
+                merged.add (new double [] {iv[0], iv[1]});
+        }
+
+        // Trouver le meilleur gap (le plus accessible depuis start et end)
+        double bestGapPerp = 0.0;
+        double bestGapSize = 0.0;
+
+        // Gaps entre intervalles
+        for (int k = 0; k < merged.size () - 1; k++)
+        {
+            double gStart = merged.get (k)[1];
+            double gEnd = merged.get (k + 1)[0];
+            double sz = gEnd - gStart;
+            if (sz > bestGapSize)
+            {
+                bestGapSize = sz;
+                bestGapPerp = (gStart + gEnd) / 2.0;
+            }
+        }
+        // Gaps aux extremites (passer par dessus/dessous le mur)
+        if (!merged.isEmpty ())
+        {
+            double aboveGap = 10.0; // taille estimee au-dessus
+            double belowGap = 10.0; // taille estimee en-dessous
+            double aboveCenter = merged.get (merged.size () - 1)[1] + 3.0;
+            double belowCenter = merged.get (0)[0] - 3.0;
+            if (aboveGap > bestGapSize)
+            {
+                bestGapSize = aboveGap;
+                bestGapPerp = aboveCenter;
+            }
+        }
+
+        if (bestGapSize < 0.5) return result; // pas de gap exploitable
+
+        // Construire le waypoint : le point de passage du gap
+        double gapX = cx + bestGapPerp * nx;
+        double gapY = cy + bestGapPerp * ny;
+
+        // Retourner comme un pseudo-mur avec waypoint en coords absolues.
+        // Le format est [wallPos, gapCenter, gapSize] mais ici on stocke directement
+        // les coords x,y du gap car le mur est diagonal.
+        // On utilise une convention speciale : wallPos = projection sur l'axe path.
+        double pathDx = ex - sx, pathDy = ey - sy;
+        double pathLen = Math.hypot (pathDx, pathDy);
+        if (pathLen < 1e-9) return result;
+        double projOnPath = ((gapX - sx) * pathDx + (gapY - sy) * pathDy) / pathLen;
+
+        result.add (new double [] {projOnPath, 0.0, bestGapSize, gapX, gapY});
+        return result;
     }
 
     /**
@@ -1313,7 +1546,7 @@ public class OptiPath extends CompetitorProject
         int adaptiveGrid = (minGap > 0.5)
                 ? (int) (domainSize / minGap * 4)
                 : 24 + nObs;
-        int grid = Math.max (40, Math.min (80, adaptiveGrid));
+        int grid = Math.max (40, Math.min (160, adaptiveGrid));
         double minX = problem.getMinX (), maxX = problem.getMaxX ();
         double minY = problem.getMinY (), maxY = problem.getMaxY ();
         double stepX = (maxX - minX) / Math.max (1, grid - 1);
