@@ -342,6 +342,7 @@ public class OptiPath extends CompetitorProject
         variance /= n;
         seedStats = new SeedingStats (best, median, Math.sqrt (variance), p25);
         restartStrategy.init (seedStats);
+
     }
 
     private void addSeed (ArrayList<double []> seeds, ArrayList<Double> fits, double [] p)
@@ -697,17 +698,21 @@ public class OptiPath extends CompetitorProject
         // Detecter murs verticaux ET horizontaux, garder la meilleure orientation
         ArrayList<double []> vWalls = detectWalls (ox, oy, or_, nObs, true);
         ArrayList<double []> hWalls = detectWalls (oy, ox, or_, nObs, false);
-        boolean vertical = vWalls.size () >= hWalls.size ();
+
+        // Choisir l'orientation : comparer le total d'obstacles couverts par les murs detectes
+        // (pas juste le nombre de murs, car des faux positifs peuvent apparaitre
+        // quand des obstacles de murs differents partagent la meme coordonnee secondaire)
+        int vObsCount = countWallObstacles (ox, or_, nObs, vWalls);
+        int hObsCount = countWallObstacles (oy, or_, nObs, hWalls);
+        boolean vertical = vObsCount >= hObsCount;
         ArrayList<double []> walls = vertical ? vWalls : hWalls;
 
-        // Si les deux orientations ont des murs, utiliser celle qui couvre le plus
-        // de la trajectoire start→end (mesure par projection sur l'axe principal)
-        if (!vWalls.isEmpty () && !hWalls.isEmpty ())
+        // Si egalite stricte, privilegier l'orientation alignee au chemin
+        if (vObsCount == hObsCount && !vWalls.isEmpty () && !hWalls.isEmpty ())
         {
             double dxPath = Math.abs (ex - sx);
             double dyPath = Math.abs (ey - sy);
-            vertical = (dxPath >= dyPath) ? (vWalls.size () >= hWalls.size ())
-                                          : (vWalls.size () > hWalls.size ());
+            vertical = dxPath >= dyPath;
             walls = vertical ? vWalls : hWalls;
         }
 
@@ -800,6 +805,8 @@ public class OptiPath extends CompetitorProject
         double [] allOvershoots = new double [baseOvershoots.length + extraOvershoots.length];
         System.arraycopy (baseOvershoots, 0, allOvershoots, 0, baseOvershoots.length);
         System.arraycopy (extraOvershoots, 0, allOvershoots, baseOvershoots.length, extraOvershoots.length);
+        double bestAwareFit = Double.POSITIVE_INFINITY;
+        double [] bestAwareP = null;
         for (double overshoot : allOvershoots)
         {
             for (int v = 0; v < 5; v++)
@@ -818,9 +825,11 @@ public class OptiPath extends CompetitorProject
                     p[2*i + 1] = straightY + devY * overshoot + noise;
                 }
                 addSeed (seeds, fits, p);
+                double lastF = fits.get (fits.size () - 1);
+                if (lastF < bestAwareFit) { bestAwareFit = lastF; bestAwareP = p.clone (); }
             }
         }
-
+        // DEBUG obstacle-aware seeds
         // Strategie 2 : waypoint-clamp — assigner chaque CP au waypoint
         // le plus proche et placer PLUSIEURS CPs consecutifs au gap.
         // Ca force la courbe Bezier a passer par les gaps car
@@ -895,6 +904,16 @@ public class OptiPath extends CompetitorProject
 
         // Strategie 4 : spline Hermite lisse a travers les waypoints
         addHermiteSplineSeeds (seeds, fits, waypoints);
+
+        // Strategie 5 : seeds cosinus pour chemins zigzag complexes.
+        // Au lieu de placer les CPs sur le zigzag (oscillations de Runge),
+        // utiliser une fonction cosinus dont les CPs suivent un profil lisse
+        // qui correspond naturellement au pattern haut-bas-haut des gaps.
+        if (pathComplexity > 1.8 && nCP >= 6)
+        {
+            addCosineZigzagSeeds (seeds, fits, waypoints, sx, sy, ex, ey);
+            addZigzagLocalOptSeeds (seeds, fits, waypoints, sx, sy, ex, ey);
+        }
     }
 
     /**
@@ -1140,6 +1159,602 @@ public class OptiPath extends CompetitorProject
     }
 
     /**
+     * Seeds par fitting least-squares inverse pour chemins zigzag complexes.
+     *
+     * Probleme : placer les CPs sur le chemin desire ne fait PAS passer la courbe
+     * Bezier par ce chemin (CPs != points de la courbe pour degre > 1).
+     *
+     * Solution : generer un chemin lisse cible (spline Hermite a travers les gaps),
+     * echantillonner N points cibles, puis resoudre le probleme inverse :
+     *   trouver P_1..P_nCP tels que ||A * P - b||² soit minimise
+     * ou A[k][i] = B_{i+1, n}(t_k) (poids de Bernstein).
+     *
+     * Le resultat : les CPs qui font que la courbe Bezier PASSE reellement par
+     * (ou au plus pres de) le chemin cible.
+     */
+    private void addCosineZigzagSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
+                                        double [][] waypoints,
+                                        double sx, double sy, double ex, double ey)
+    {
+        int nWp = waypoints.length;
+        if (nWp < 4) return;
+
+        int n = nCP + 1; // degre du Bezier (n+1 = nCP+2 points de controle total)
+
+        // --- Etape 1 : generer le chemin cible lisse (spline Hermite) ---
+        double [][] tangents = new double [nWp][2];
+        for (int w = 0; w < nWp; w++)
+        {
+            if (w == 0)
+            { tangents[w][0] = waypoints[1][0] - waypoints[0][0]; tangents[w][1] = waypoints[1][1] - waypoints[0][1]; }
+            else if (w == nWp - 1)
+            { tangents[w][0] = waypoints[nWp-1][0] - waypoints[nWp-2][0]; tangents[w][1] = waypoints[nWp-1][1] - waypoints[nWp-2][1]; }
+            else
+            { tangents[w][0] = (waypoints[w+1][0] - waypoints[w-1][0]) * 0.5; tangents[w][1] = (waypoints[w+1][1] - waypoints[w-1][1]) * 0.5; }
+        }
+
+        for (double tangentScale : new double [] {0.5, 1.0, 1.5, 2.0, 3.0})
+        {
+            // Echantillonner le chemin cible
+            int sampPerSeg = 30;
+            int totalMax = sampPerSeg * (nWp - 1) + 1;
+            double [] pathX = new double [totalMax];
+            double [] pathY = new double [totalMax];
+            double [] cumLen = new double [totalMax];
+            int nSamp = 0;
+            double totalLen = 0.0;
+            for (int seg = 0; seg < nWp - 1; seg++)
+            {
+                int kMax = (seg == nWp - 2) ? sampPerSeg : sampPerSeg;
+                for (int k = 0; k <= ((seg == nWp - 2) ? sampPerSeg : sampPerSeg - 1); k++)
+                {
+                    double u = (double) k / sampPerSeg;
+                    double u2 = u * u, u3 = u2 * u;
+                    double h00 = 2*u3 - 3*u2 + 1, h10 = u3 - 2*u2 + u;
+                    double h01 = -2*u3 + 3*u2, h11 = u3 - u2;
+                    pathX[nSamp] = h00*waypoints[seg][0] + h10*tangents[seg][0]*tangentScale
+                                 + h01*waypoints[seg+1][0] + h11*tangents[seg+1][0]*tangentScale;
+                    pathY[nSamp] = h00*waypoints[seg][1] + h10*tangents[seg][1]*tangentScale
+                                 + h01*waypoints[seg+1][1] + h11*tangents[seg+1][1]*tangentScale;
+                    if (nSamp > 0)
+                        totalLen += Math.hypot (pathX[nSamp] - pathX[nSamp-1],
+                                                pathY[nSamp] - pathY[nSamp-1]);
+                    cumLen[nSamp] = totalLen;
+                    nSamp++;
+                }
+            }
+            if (totalLen < 1e-9 || nSamp < 5) continue;
+
+            // --- Etape 2 : parametriser les echantillons via la coordonnee x ---
+            // Pour des CPs x lineaires, B_x(t) ≈ sx + t*(ex-sx), donc t ≈ (x-sx)/(ex-sx).
+            // Cette param correspond naturellement au Bernstein et evite le Runge.
+            double dxPath = ex - sx;
+            double [] tSamp = new double [nSamp];
+            if (Math.abs (dxPath) > 1e-9)
+                for (int k = 0; k < nSamp; k++)
+                    tSamp[k] = Math.max (0.001, Math.min (0.999,
+                            (pathX[k] - sx) / dxPath));
+            else
+                for (int k = 0; k < nSamp; k++)
+                    tSamp[k] = cumLen[k] / totalLen;
+
+            // --- Etape 3 : construire la matrice de Bernstein et le vecteur cible ---
+            // B(t) = B_{0,n}(t)*P_0 + sum_{i=1..nCP} B_{i,n}(t)*P_i + B_{n,n}(t)*P_{n+1}
+            // On cherche P_1..P_nCP qui minimisent ||sum B_i * P_i - (target - B_0*start - B_n*end)||²
+            double [][] A = new double [nSamp][nCP];
+            double [] bx = new double [nSamp], by = new double [nSamp];
+            for (int k = 0; k < nSamp; k++)
+            {
+                double [] bw = bernsteinWeights (n, tSamp[k]);
+                for (int i = 0; i < nCP; i++)
+                    A[k][i] = bw[i + 1];
+                bx[k] = pathX[k] - bw[0] * sx - bw[n] * ex;
+                by[k] = pathY[k] - bw[0] * sy - bw[n] * ey;
+            }
+
+            // --- Etape 4 : resoudre par ridge regression (A^T A + lambda*I) P = A^T b ---
+            // Lambda empeche les CPs d'exploser (regularisation de Tikhonov)
+            // CPs de reference : ligne droite start→end
+            double [] refX = new double [nCP], refY = new double [nCP];
+            for (int i = 0; i < nCP; i++)
+            { double t = (double)(i+1)/(nCP+1); refX[i] = sx + t*(ex-sx); refY[i] = sy + t*(ey-sy); }
+
+            for (double lambda : new double [] {0.01, 0.1, 1.0, 5.0, 20.0, 100.0})
+            {
+                double [][] ATA = new double [nCP][nCP];
+                double [] ATbx = new double [nCP], ATby = new double [nCP];
+                for (int i = 0; i < nCP; i++)
+                {
+                    for (int j = i; j < nCP; j++)
+                    {
+                        double s = 0;
+                        for (int k = 0; k < nSamp; k++) s += A[k][i] * A[k][j];
+                        ATA[i][j] = s;
+                        ATA[j][i] = s;
+                    }
+                    ATA[i][i] += lambda;
+                    for (int k = 0; k < nSamp; k++)
+                    { ATbx[i] += A[k][i] * bx[k]; ATby[i] += A[k][i] * by[k]; }
+                    // Regulariser vers la ligne droite
+                    ATbx[i] += lambda * refX[i];
+                    ATby[i] += lambda * refY[i];
+                }
+
+                double [][] inv = invertMatrix (ATA, nCP);
+                if (inv == null) continue;
+
+                double [] cpXr = new double [nCP], cpYr = new double [nCP];
+                for (int i = 0; i < nCP; i++)
+                    for (int j = 0; j < nCP; j++)
+                    { cpXr[i] += inv[i][j] * ATbx[j]; cpYr[i] += inv[i][j] * ATby[j]; }
+
+                for (int v = 0; v < 2; v++)
+                {
+                    double [] p = new double [d];
+                    for (int i = 0; i < nCP; i++)
+                    {
+                        double noise = (v == 0) ? 0.0 : rng.nextGaussian () * 1.5;
+                        p[2*i]     = cpXr[i] + noise;
+                        p[2*i + 1] = cpYr[i] + noise;
+                    }
+                    addSeed (seeds, fits, p);
+                }
+                if (tangentScale == 1.0)
+                {
+                }
+            }
+
+        }
+    }
+
+    /**
+     * Seeds zigzag avec pre-optimisation locale rapide.
+     *
+     * Probleme : les CPs placees sur un zigzag donnent un score catastrophique
+     * (76000+) a cause du Runge, et ne rentrent jamais dans le top-20 seeds.
+     * CMA-ES ne les voit donc jamais.
+     *
+     * Solution : partir du zigzag CP brut, faire une mini-optimisation locale
+     * (hill climbing) pour descendre le score a quelques milliers, puis injecter
+     * ce seed pre-optimise. CMA-ES partira alors dans le bon bassin.
+     */
+    private void addZigzagLocalOptSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
+                                          double [][] waypoints,
+                                          double sx, double sy, double ex, double ey)
+    {
+        int nWp = waypoints.length;
+        if (nWp < 4) return;
+
+        // Construire plusieurs seeds zigzag initiaux avec differents decoupages
+        // On essaie: repartition uniforme et repartition proportionnelle a la longueur
+        ArrayList<double []> zigzagStarts = new ArrayList<> ();
+
+        // Variante 1 : blocs uniformes (nCP/nSegments CPs par segment)
+        {
+            int nSeg = nWp - 1;
+            double [] p = new double [d];
+            int cpIdx = 0;
+            for (int s = 0; s < nSeg && cpIdx < nCP; s++)
+            {
+                int cpsInSeg = (s < nSeg - 1) ? nCP / nSeg : nCP - cpIdx;
+                for (int c = 0; c < cpsInSeg && cpIdx < nCP; c++)
+                {
+                    double t = (double)(c + 1) / (cpsInSeg + 1);
+                    p[2*cpIdx]     = waypoints[s][0] + t * (waypoints[s+1][0] - waypoints[s][0]);
+                    p[2*cpIdx + 1] = waypoints[s][1] + t * (waypoints[s+1][1] - waypoints[s][1]);
+                    cpIdx++;
+                }
+            }
+            zigzagStarts.add (p);
+        }
+
+        // Variante 2 : blocs haut/bas/haut (premier tiers haut, milieu bas, dernier haut)
+        {
+            double [] p = new double [d];
+            int third = nCP / 3;
+            for (int i = 0; i < nCP; i++)
+            {
+                double t = (double)(i + 1) / (nCP + 1);
+                p[2*i] = sx + t * (ex - sx);
+                if (i < third)
+                    p[2*i+1] = waypoints[1][1]; // y du premier gap (haut ou bas)
+                else if (i < 2 * third)
+                    p[2*i+1] = waypoints[2][1]; // y du deuxieme gap
+                else
+                    p[2*i+1] = waypoints[nWp-2][1]; // y du dernier gap
+            }
+            zigzagStarts.add (p);
+        }
+
+        // Variante 3 : CPs a Y extreme (amplifie) pour compenser le lissage
+        for (double amp : new double [] {1.5, 2.0})
+        {
+            double yMid = (waypoints[1][1] + waypoints[2][1]) / 2.0;
+            double [] p = new double [d];
+            int third = nCP / 3;
+            for (int i = 0; i < nCP; i++)
+            {
+                double t = (double)(i + 1) / (nCP + 1);
+                p[2*i] = sx + t * (ex - sx);
+                double yTarget;
+                if (i < third) yTarget = waypoints[1][1];
+                else if (i < 2 * third) yTarget = waypoints[2][1];
+                else yTarget = waypoints[nWp-2][1];
+                p[2*i+1] = yMid + (yTarget - yMid) * amp;
+            }
+            zigzagStarts.add (p);
+        }
+
+        // Pour chaque seed zigzag, faire un hill climbing rapide
+        double bestLocalF = Double.POSITIVE_INFINITY;
+        double [] bestLocalP = null;
+        int localIters = 3000;
+
+        for (double [] start : zigzagStarts)
+        {
+            clamp (start);
+            double curF = problem.evaluate (start);
+            trackBest (curF);
+            double [] cur = start.clone ();
+            double step = 3.0;
+
+            for (int iter = 0; iter < localIters; iter++)
+            {
+                double [] trial = cur.clone ();
+                // Perturber 1 a 3 coordonnees
+                int nPerturb = 1 + rng.nextInt (3);
+                for (int pp = 0; pp < nPerturb; pp++)
+                {
+                    int idx = rng.nextInt (d);
+                    trial[idx] += rng.nextGaussian () * step;
+                }
+                clamp (trial);
+                double trialF = problem.evaluate (trial);
+                trackBest (trialF);
+                if (trialF < curF)
+                {
+                    cur = trial;
+                    curF = trialF;
+                }
+                if (iter % 2000 == 1999) step *= 0.7;
+            }
+
+            if (curF < bestLocalF)
+            {
+                bestLocalF = curF;
+                bestLocalP = cur.clone ();
+            }
+
+            // Ajouter ce seed pre-optimise
+            addSeed (seeds, fits, cur);
+        }
+
+        // Generer des variantes bruitees du meilleur
+        if (bestLocalP != null)
+        {
+            for (int v = 0; v < 5; v++)
+            {
+                double [] p = bestLocalP.clone ();
+                double noise = 1.0 + v * 0.5;
+                for (int i = 0; i < d; i++)
+                    p[i] += rng.nextGaussian () * noise;
+                addSeed (seeds, fits, p);
+            }
+        }
+    }
+
+    /**
+     * Seeding "anti-Runge" pour Bezier haut degre avec zigzag complexe.
+     *
+     * Probleme : un Bezier de degre N avec CPs le long d'un zigzag produit
+     * d'enormes oscillations (phenomene de Runge). Les CPs "interpolees" donnent
+     * une courbe qui depasse les waypoints et traverse les obstacles.
+     *
+     * Solution : au lieu d'interpoler les CPs, on genere des seeds qui SUBDIVISE
+     * le probleme en segments et place les CPs pour que la courbe resultante
+     * passe aux bons endroits. On essaie plusieurs strategies :
+     * - Exaggeration : CPs au-dela des waypoints pour compenser le lissage
+     * - Segments lineaires entre les gaps : les CPs forment une ligne droite
+     *   entre gap_i et gap_{i+1}, pas d'interpolation globale
+     */
+    private void addAntiRungSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
+                                     double [][] waypoints)
+    {
+        int nWp = waypoints.length;
+        if (nWp < 4) return; // besoin d'au moins 2 waypoints intermediaires
+
+        // Strategie A : ligne droite par segment
+        // Distribuer les CPs entre les segments proportionnellement a la longueur.
+        // Dans chaque segment, les CPs sont distribues lineairement SANS influence
+        // des autres segments.
+        double [] segLen = new double [nWp - 1];
+        double totalLen = 0;
+        for (int s = 0; s < nWp - 1; s++)
+        {
+            segLen[s] = Math.hypot (waypoints[s+1][0] - waypoints[s][0],
+                                     waypoints[s+1][1] - waypoints[s][1]);
+            totalLen += segLen[s];
+        }
+        if (totalLen < 1e-9) return;
+
+        // Repartir CPs par segment (proportionnel a la longueur)
+        int [] cpPerSeg = new int [nWp - 1];
+        int assigned = 0;
+        for (int s = 0; s < nWp - 1; s++)
+        {
+            cpPerSeg[s] = Math.max (1, (int) Math.round (nCP * segLen[s] / totalLen));
+            assigned += cpPerSeg[s];
+        }
+        // Ajuster si on a trop/pas assez de CPs
+        while (assigned > nCP)
+        {
+            int longest = 0;
+            for (int s = 1; s < nWp - 1; s++)
+                if (cpPerSeg[s] > cpPerSeg[longest]) longest = s;
+            if (cpPerSeg[longest] <= 1) break;
+            cpPerSeg[longest]--;
+            assigned--;
+        }
+        while (assigned < nCP)
+        {
+            int shortest = 0;
+            for (int s = 1; s < nWp - 1; s++)
+                if (cpPerSeg[s] < cpPerSeg[shortest]) shortest = s;
+            cpPerSeg[shortest]++;
+            assigned++;
+        }
+
+        // Generer le seed : CPs distribues dans chaque segment
+        for (int v = 0; v < 6; v++)
+        {
+            double [] p = new double [d];
+            int cpIdx = 0;
+            for (int s = 0; s < nWp - 1; s++)
+            {
+                for (int c = 0; c < cpPerSeg[s] && cpIdx < nCP; c++)
+                {
+                    // Position relative dans le segment [0.1, 0.9] pour eviter
+                    // d'etre exactement sur les waypoints
+                    double t = (cpPerSeg[s] == 1) ? 0.5
+                                : 0.1 + 0.8 * c / (cpPerSeg[s] - 1);
+                    double noise = (v == 0) ? 0.0 : rng.nextGaussian () * 1.0;
+                    p[2 * cpIdx]     = waypoints[s][0] + t * (waypoints[s+1][0] - waypoints[s][0]) + noise;
+                    p[2 * cpIdx + 1] = waypoints[s][1] + t * (waypoints[s+1][1] - waypoints[s][1]) + noise;
+                    cpIdx++;
+                }
+            }
+            addSeed (seeds, fits, p);
+        }
+
+        // Strategie B : CPs clusterises aux waypoints avec exageration
+        // Pour chaque waypoint interieur, on place ~3 CPs au-dela du waypoint
+        // (dans la direction du virage) pour compenser le lissage Bezier
+        int nInner = nWp - 2; // waypoints interieurs (les gaps)
+        int cpsPerGap = Math.max (2, nCP / (nInner + 1));
+        int cpsTransit = nCP - cpsPerGap * nInner;
+
+        for (double exagFactor : new double [] {1.2, 1.5, 2.0, 2.5})
+        {
+            for (int v = 0; v < 3; v++)
+            {
+                double [] p = new double [d];
+                int cpIdx2 = 0;
+                // CPs de transit avant le premier gap
+                int transitBefore = cpsTransit / 2;
+                for (int c = 0; c < transitBefore && cpIdx2 < nCP; c++)
+                {
+                    double t = (double) (c + 1) / (transitBefore + 1);
+                    p[2 * cpIdx2]     = waypoints[0][0] + t * (waypoints[1][0] - waypoints[0][0]);
+                    p[2 * cpIdx2 + 1] = waypoints[0][1] + t * (waypoints[1][1] - waypoints[0][1]);
+                    cpIdx2++;
+                }
+
+                // CPs clusterises a chaque gap avec exageration
+                for (int g = 0; g < nInner; g++)
+                {
+                    double gx = waypoints[g + 1][0];
+                    double gy = waypoints[g + 1][1];
+                    // Direction du virage : deviation par rapport a la ligne droite start→end
+                    double midX = (waypoints[0][0] + waypoints[nWp-1][0]) / 2.0;
+                    double midY = (waypoints[0][1] + waypoints[nWp-1][1]) / 2.0;
+                    double devX = gx - midX;
+                    double devY = gy - midY;
+
+                    for (int c = 0; c < cpsPerGap && cpIdx2 < nCP; c++)
+                    {
+                        double frac = (cpsPerGap == 1) ? 0.0
+                                    : (double) c / (cpsPerGap - 1) - 0.5; // -0.5 a +0.5
+                        // Exagerer la position du waypoint
+                        double exX = midX + devX * exagFactor;
+                        double exY = midY + devY * exagFactor;
+                        // Petit spread le long de l'axe x pour eviter le clustering exact
+                        double spreadX = frac * (waypoints[Math.min (g+2, nWp-1)][0] - waypoints[g][0]) * 0.3;
+                        double noise = (v == 0) ? 0.0 : rng.nextGaussian () * 1.0;
+                        p[2 * cpIdx2]     = exX + spreadX + noise;
+                        p[2 * cpIdx2 + 1] = exY + noise;
+                        cpIdx2++;
+                    }
+                }
+
+                // CPs de transit apres le dernier gap
+                while (cpIdx2 < nCP)
+                {
+                    double t = (double) (cpIdx2 - (nCP - cpsTransit + transitBefore) + 1)
+                               / (cpsTransit - transitBefore + 1);
+                    t = Math.max (0.1, Math.min (0.9, t));
+                    p[2 * cpIdx2]     = waypoints[nWp-2][0]
+                            + t * (waypoints[nWp-1][0] - waypoints[nWp-2][0]);
+                    p[2 * cpIdx2 + 1] = waypoints[nWp-2][1]
+                            + t * (waypoints[nWp-1][1] - waypoints[nWp-2][1]);
+                    cpIdx2++;
+                }
+
+                addSeed (seeds, fits, p);
+            }
+        }
+    }
+
+    /**
+     * Seeds "extreme" pour forcer un Bezier haut degre a traverser les gaps.
+     *
+     * Utilise la pseudo-inverse de la matrice de Bernstein pour resoudre
+     * simultanement toutes les contraintes de passage par les gaps.
+     * Pour nGaps contraintes et nCP inconnues (nGaps << nCP), on minimise
+     * la distance aux CPs de reference tout en satisfaisant les contraintes.
+     */
+    private void addExtremeZigzagSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
+                                          double [][] waypoints,
+                                          double sx, double sy, double ex, double ey)
+    {
+        int nWp = waypoints.length;
+        if (nWp < 4) return;
+        int n = nCP + 1; // degre du Bezier
+
+        // Parametres t pour chaque gap
+        // Estimation basee sur la coordonnee x (la plus fiable car les CPs
+        // de reference sont distribues lineairement en x de start a end)
+        int nGaps = nWp - 2;
+        double dxPath = ex - sx;
+        if (Math.abs (dxPath) < 1e-9) return;
+
+        double [] tGap = new double [nGaps];
+        for (int g = 0; g < nGaps; g++)
+            tGap[g] = Math.max (0.02, Math.min (0.98,
+                        (waypoints[g + 1][0] - sx) / dxPath));
+
+        // Matrice de Bernstein A[g][i] = B_{i+1}(tGap[g]) pour i=0..nCP-1
+        // On ne corrige QUE les Y (les X restent sur la ligne droite)
+        double [][] A = new double [nGaps][nCP];
+        double [] residY = new double [nGaps];
+        for (int g = 0; g < nGaps; g++)
+        {
+            double [] bw = bernsteinWeights (n, tGap[g]);
+            for (int i = 0; i < nCP; i++)
+                A[g][i] = bw[i + 1];
+            residY[g] = waypoints[g + 1][1] - bw[0] * sy - bw[n] * ey;
+        }
+
+        // CPs de reference (ligne droite start→end)
+        double [] refX = new double [nCP], refY = new double [nCP];
+        for (int i = 0; i < nCP; i++)
+        {
+            double t = (double) (i + 1) / (nCP + 1);
+            refX[i] = sx + t * (ex - sx);
+            refY[i] = sy + t * (ey - sy);
+        }
+
+        // Residu Y : cible - contribution actuelle des CPs de reference
+        double [] rY = new double [nGaps];
+        for (int g = 0; g < nGaps; g++)
+        {
+            rY[g] = residY[g];
+            for (int i = 0; i < nCP; i++)
+                rY[g] -= A[g][i] * refY[i];
+        }
+
+        // Pseudo-inverse : deltaY = A^T * (A*A^T)^{-1} * rY
+        double [][] AAT = new double [nGaps][nGaps];
+        for (int g = 0; g < nGaps; g++)
+            for (int h = 0; h < nGaps; h++)
+                for (int i = 0; i < nCP; i++)
+                    AAT[g][h] += A[g][i] * A[h][i];
+
+        double [][] inv = invertMatrix (AAT, nGaps);
+        if (inv == null) return;
+
+        double [] lambdaY = new double [nGaps];
+        for (int g = 0; g < nGaps; g++)
+            for (int h = 0; h < nGaps; h++)
+                lambdaY[g] += inv[g][h] * rY[h];
+
+        double [] deltaY = new double [nCP];
+        for (int i = 0; i < nCP; i++)
+            for (int g = 0; g < nGaps; g++)
+                deltaY[i] += A[g][i] * lambdaY[g];
+
+        // DEBUG: afficher les t-values et delta Y
+        StringBuilder dbg = new StringBuilder ("DEBUG extremeZigzag: tGap=");
+        for (int g = 0; g < nGaps; g++)
+            dbg.append (String.format ("%.3f ", tGap[g]));
+        dbg.append (" deltaY range=[");
+        double minDY = Double.MAX_VALUE, maxDY = -Double.MAX_VALUE;
+        for (int i = 0; i < nCP; i++)
+        {
+            if (deltaY[i] < minDY) minDY = deltaY[i];
+            if (deltaY[i] > maxDY) maxDY = deltaY[i];
+        }
+        dbg.append (String.format ("%.1f, %.1f", minDY, maxDY)).append ("]");
+        System.err.println (dbg.toString ());
+
+        // Generer les seeds avec differentes echelles
+        double bestF = Double.POSITIVE_INFINITY;
+        for (double scale : new double [] {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0})
+        {
+            for (int v = 0; v < 3; v++)
+            {
+                double [] p = new double [d];
+                for (int i = 0; i < nCP; i++)
+                {
+                    double noise = (v == 0) ? 0.0 : rng.nextGaussian () * 1.5;
+                    p[2 * i]     = refX[i] + noise;
+                    p[2 * i + 1] = refY[i] + deltaY[i] * scale + noise;
+                }
+                addSeed (seeds, fits, p);
+                double lastF = fits.get (fits.size () - 1);
+                if (lastF < bestF) bestF = lastF;
+            }
+        }
+        System.err.println ("DEBUG extremeZigzag: bestF=" + String.format ("%.1f", bestF));
+    }
+
+    /** Inverse une matrice n×n par Gauss-Jordan. Retourne null si singuliere. */
+    private static double [][] invertMatrix (double [][] m, int n)
+    {
+        double [][] a = new double [n][2 * n];
+        for (int i = 0; i < n; i++)
+        {
+            System.arraycopy (m[i], 0, a[i], 0, n);
+            a[i][n + i] = 1.0;
+        }
+        for (int col = 0; col < n; col++)
+        {
+            int pivot = col;
+            for (int row = col + 1; row < n; row++)
+                if (Math.abs (a[row][col]) > Math.abs (a[pivot][col])) pivot = row;
+            double [] tmp = a[col]; a[col] = a[pivot]; a[pivot] = tmp;
+            if (Math.abs (a[col][col]) < 1e-12) return null;
+            double div = a[col][col];
+            for (int j = 0; j < 2 * n; j++) a[col][j] /= div;
+            for (int row = 0; row < n; row++)
+            {
+                if (row == col) continue;
+                double factor = a[row][col];
+                for (int j = 0; j < 2 * n; j++) a[row][j] -= factor * a[col][j];
+            }
+        }
+        double [][] result = new double [n][n];
+        for (int i = 0; i < n; i++)
+            System.arraycopy (a[i], n, result[i], 0, n);
+        return result;
+    }
+
+    /** Calcule les n+1 poids de Bernstein B_i,n(t) pour i=0..n. */
+    private static double [] bernsteinWeights (int n, double t)
+    {
+        double [] w = new double [n + 1];
+        // Log-space pour eviter overflow des combinaisons
+        double [] logC = new double [n + 1];
+        logC[0] = 0;
+        for (int i = 1; i <= n; i++)
+            logC[i] = logC[i - 1] + Math.log (n - i + 1) - Math.log (i);
+        double logT = Math.log (Math.max (t, 1e-300));
+        double log1T = Math.log (Math.max (1 - t, 1e-300));
+        for (int i = 0; i <= n; i++)
+            w[i] = Math.exp (logC[i] + i * logT + (n - i) * log1T);
+        return w;
+    }
+
+    /**
      * Genere des seeds de contournement pour les obstacles qui bloquent le chemin direct.
      * Fonctionne pour TOUTE configuration d'obstacles (y compris isolees, gros rayon, etc.).
      * Strategie : detecter les obstacles sur le segment start→end, calculer des waypoints
@@ -1288,6 +1903,26 @@ public class OptiPath extends CompetitorProject
                                        detectedWaypoints[s+1][1] - detectedWaypoints[s][1]);
             this.pathComplexity = (directDist > 1e-9) ? totalD / directDist : 1.0;
         }
+    }
+
+    /**
+     * Compte le nombre total d'obstacles couverts par un ensemble de murs detectes.
+     * Utilise pour comparer murs verticaux vs horizontaux.
+     */
+    private int countWallObstacles (double [] primary, double [] radii, int n,
+                                     ArrayList<double []> walls)
+    {
+        int count = 0;
+        for (double [] wall : walls)
+        {
+            double wallPos = wall[0];
+            for (int i = 0; i < n; i++)
+            {
+                if (Math.abs (primary[i] - wallPos) < 1.5 * radii[i])
+                    count++;
+            }
+        }
+        return count;
     }
 
     /**
