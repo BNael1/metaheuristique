@@ -41,8 +41,8 @@ public final class Main extends OutputWriter {
 
 	private static final String LOG_FILE = "bezier.log";
 	private static final int AWAIT = 1;
-	//private static final int NB_RUNS = 10;
-	private static final int NB_RUNS = 3;
+	private static final int NB_RUNS = 10;
+	//private static final int NB_RUNS = 3;
 	private static final int NB_SECONDS = 60;
 	// private static final int NB_SECONDS = 10;
 	public static final boolean DISPLAY_CHART = true;
@@ -53,9 +53,9 @@ public final class Main extends OutputWriter {
 	// static final boolean COMPETITION = false;
 
 	// ====== CHOIX DES PROBLEMES A LANCER ======
-	// Mettre les numeros des probs voulus (ex: {4} pour prob4 seul, {1,2,3,4,5,6,7} pour tous)
-	private static final int[] SELECTED_PROBLEMS = {12};
-
+	// Mettre les noms des probs voulus (ex: {"prob4"} pour prob4 seul)
+	private static final String[] SELECTED_PROBLEMS = {"prob1", "prob2", "prob3", "prob4", "prob5", "prob6", "prob7", "prob8", "prob9", "prob10", "prob11"};
+	//private static final String[] SELECTED_PROBLEMS = {"prob9"};
 	/**
 	 * @return Retourne l'instance de Main
 	 */
@@ -168,8 +168,8 @@ public final class Main extends OutputWriter {
 		ArrayList<Problem> allProblems = Problem.getProblems();
 		ArrayList<Problem> problems = new ArrayList<Problem>();
 		for (Problem p : allProblems)
-			for (int sel : SELECTED_PROBLEMS)
-				if (p.getName().contains(String.valueOf(sel)))
+			for (String sel : SELECTED_PROBLEMS)
+				if (p.getName().equals(sel))
 				{ problems.add(p); break; }
 		int maxLength = 0;
 		for (Problem problem : problems)
