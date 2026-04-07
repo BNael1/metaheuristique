@@ -10,6 +10,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -17,6 +18,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import org.reflections.Reflections;
 
@@ -41,7 +46,7 @@ public final class Main extends OutputWriter {
 
 	private static final String LOG_FILE = "bezier.log";
 	private static final int AWAIT = 1;
-	private static final int NB_RUNS = 10;
+	private static final int NB_RUNS = 1;
 	//private static final int NB_RUNS = 3;
 	private static final int NB_SECONDS = 60;
 	// private static final int NB_SECONDS = 10;
@@ -51,11 +56,13 @@ public final class Main extends OutputWriter {
 	// static final boolean DISPLAY_STD_OUT = false;
 	static final boolean COMPETITION = true;
 	// static final boolean COMPETITION = false;
+	private static final String DATA_DIR = "data";
 
 	// ====== CHOIX DES PROBLEMES A LANCER ======
-	// Mettre les noms des probs voulus (ex: {"prob4"} pour prob4 seul)
-	private static final String[] SELECTED_PROBLEMS = {"prob1", "prob2", "prob3", "prob4", "prob5", "prob6", "prob7", "prob8", "prob9", "prob10", "prob11"};
-	//private static final String[] SELECTED_PROBLEMS = {"prob9"};
+	// Mode auto (par defaut): laisser MANUAL_SELECTED_PROBLEMS a null.
+	// Mode manuel: decommenter la ligne ci-dessous et indiquer un ou plusieurs problemes.
+	private static final String[] MANUAL_SELECTED_PROBLEMS = {"prob16", "prob17", "prob18"};
+	//private static final String[] MANUAL_SELECTED_PROBLEMS = null;
 	/**
 	 * @return Retourne l'instance de Main
 	 */
@@ -66,6 +73,25 @@ public final class Main extends OutputWriter {
 	}
 
 	private Main() {
+	}
+
+	private static Set<String> getProblemNamesFromDataDir() {
+		Set<String> names = new HashSet<String>();
+		try {
+			Path dataPath = Paths.get(Main.DATA_DIR);
+			if (!Files.exists(dataPath) || !Files.isDirectory(dataPath))
+				return names;
+			try (Stream<Path> paths = Files.list(dataPath)) {
+				paths.forEach(path -> {
+					String filename = path.getFileName().toString();
+					if (filename.startsWith("prob") && filename.endsWith(".bzr"))
+						names.add(filename.substring(0, filename.length() - 4));
+				});
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return names;
 	}
 
 	private static Solution run(Class<?> subClass, Problem problem)
@@ -166,11 +192,17 @@ public final class Main extends OutputWriter {
 			this.println("");
 		Problem.getProblems();
 		ArrayList<Problem> allProblems = Problem.getProblems();
+		Set<String> selectedProblemNames = new HashSet<String>();
+		if (Main.MANUAL_SELECTED_PROBLEMS != null)
+			selectedProblemNames.addAll(Arrays.asList(Main.MANUAL_SELECTED_PROBLEMS));
+		else
+			selectedProblemNames = Main.getProblemNamesFromDataDir();
 		ArrayList<Problem> problems = new ArrayList<Problem>();
 		for (Problem p : allProblems)
-			for (String sel : SELECTED_PROBLEMS)
-				if (p.getName().equals(sel))
-				{ problems.add(p); break; }
+			if (selectedProblemNames.contains(p.getName()))
+				problems.add(p);
+		if (problems.isEmpty())
+			problems.addAll(allProblems);
 		int maxLength = 0;
 		for (Problem problem : problems)
 			if (problem.getName().length() > maxLength)
