@@ -18,9 +18,6 @@ public final class Problem
     private static final double CURVATURE = 1.;
     private static final double BOUNDARY = 100.;
 
-    /** Désactive les fenêtres graphiques legacy (BezierChart, MonitorChart). */
-    public static boolean headless = false;
-
     private Random random;
     private double bestEvaluation;
     private Bezier bestBezier;
@@ -73,10 +70,8 @@ public final class Problem
 
     private Problem (String filename)
     {
-        // Extraction portable du nom (fonctionne sur Windows et Linux)
-        String baseName = new File (filename).getName ();
-        int dot = baseName.lastIndexOf ('.');
-        this.name = (dot >= 0) ? baseName.substring (0, dot) : baseName;
+        String [] parts = filename.split ("/|\\.");
+        this.name = parts [parts.length - 2];
         try (BufferedReader in = new BufferedReader (new FileReader (new File (filename))))
         {
             String line = in.readLine ();
@@ -144,19 +139,9 @@ public final class Problem
         return endPoint;
     }
 
-    public Obstacle getObstacle (int index)
+    Obstacle getObstacle (int index)
     {
         return this.obstacles.get (index);
-    }
-
-    /**
-     * Calcule la trajectoire Bézier correspondant à un vecteur de décision.
-     * @param x vecteur de points de contrôle (alternance x/y)
-     * @return tableau de coordonnées de la trajectoire
-     */
-    public Coordinates[] computeTrajectory (double[] x)
-    {
-        return new Bezier (x, this.startPoint, this.endPoint).getTrajectory ();
     }
 
     /**
@@ -272,7 +257,15 @@ public final class Problem
      */
     public double evaluate (Bezier bezier)
     {
-        double evaluation = this.evaluateHidden (bezier);
+        Coordinates [] trajectory = bezier.getTrajectory ();
+        double length = this.computeLength (trajectory);
+        double obstaclePenalty = this.computeObstaclePenalty (trajectory);
+        double curvaturePenalty = this.computeCurvaturePenalty (trajectory);
+        double boundaryPenalty = this.computeBoundaryPenalty (trajectory);
+        double evaluation = length +
+                Problem.OBSTACLE * obstaclePenalty +
+                Problem.CURVATURE * curvaturePenalty +
+                Problem.BOUNDARY * boundaryPenalty;
         if (evaluation < this.getBestEvaluation ())
         {
             if (this.isValid (bezier))
@@ -284,25 +277,76 @@ public final class Problem
                 }
             }
         }
-        if (!Problem.headless)
-        {
-            BezierChart.getInstance ().changeBezier (this.bestBezier.getTrajectory ());
-            MonitorChart.getInstance ().addData (evaluation, this.getBestEvaluation ());
-        }
+        BezierChart.getInstance ().changeBezier (this.bestBezier.getTrajectory ());
+        MonitorChart.getInstance ().addData (evaluation, this.getBestEvaluation ());
         return evaluation;
     }
+    
+    /**
+     * @param controlPoints Une liste de points de contrôle
+     * @return Retourne un tableau des critères d'évaluation [longueur, pénalité obstacles, pénalité courbure, pénalité limites]
+     */
+    public double [] evaluateMulti (ArrayList<Coordinates> controlPoints)
+    {
+        return this.evaluateMulti (new Bezier (controlPoints, this.startPoint, this.endPoint));
+    }
 
-    private double evaluateHidden (Bezier bezier)
+    /**
+     * @param controlPoints Un tableau de points de contrôle
+     * @return Retourne un tableau des critères d'évaluation [longueur, pénalité obstacles, pénalité courbure, pénalité limites]
+     */
+    public double [] evaluateMulti (Coordinates [] controlPoints)
+    {
+        return this.evaluateMulti (new Bezier (controlPoints, this.startPoint, this.endPoint));
+    }
+
+    /**
+     * @param controlPoints Un tableau 1D de coordonnées (x0, y0, x1, y1, ...)
+     * @return Retourne un tableau des critères d'évaluation [longueur, pénalité obstacles, pénalité courbure, pénalité limites]
+     */
+    public double [] evaluateMulti (double [] controlPoints)
+    {
+        return this.evaluateMulti (new Bezier (controlPoints, this.startPoint, this.endPoint));
+    }
+
+    /**
+     * @param controlPoints Un tableau 2D de coordonnées ([i][0] = x, [i][1] = y)
+     * @return Retourne un tableau des critères d'évaluation [longueur, pénalité obstacles, pénalité courbure, pénalité limites]
+     */
+    public double [] evaluateMulti (double [][] controlPoints)
+    {
+        return this.evaluateMulti (new Bezier (controlPoints, this.startPoint, this.endPoint));
+    }
+
+    /**
+     * @param bezier Une courbe de Bézier
+     * @return Retourne un tableau des critères d'évaluation [longueur, pénalité obstacles, pénalité courbure, pénalité limites]
+     */
+    public double [] evaluateMulti (Bezier bezier)
     {
         Coordinates [] trajectory = bezier.getTrajectory ();
-        double length = this.computeLength (trajectory);
-        double obstaclePenalty = this.computeObstaclePenalty (trajectory);
-        double curvaturePenalty = this.computeCurvaturePenalty (trajectory);
-        double boundaryPenalty = this.computeBoundaryPenalty (trajectory);
-        return length +
-                Problem.OBSTACLE * obstaclePenalty +
-                Problem.CURVATURE * curvaturePenalty +
-                Problem.BOUNDARY * boundaryPenalty;
+        double [] objectives = new double []
+        {
+            this.computeLength (trajectory),
+            Problem.OBSTACLE * this.computeObstaclePenalty (trajectory),
+            Problem.CURVATURE * this.computeCurvaturePenalty (trajectory),
+            Problem.BOUNDARY * this.computeBoundaryPenalty (trajectory)
+        };
+        double evaluation = objectives [0] + objectives [1] + objectives [2] + objectives [3];
+        if (evaluation < this.getBestEvaluation ())
+        {
+            if (this.isValid (bezier))
+            {
+                if (!Thread.currentThread ().isInterrupted ())
+                {
+                    this.setBestEvaluation (evaluation);
+                    this.bestBezier = bezier;
+                }
+            }
+        }
+        BezierChart.getInstance ().changeBezier (this.bestBezier.getTrajectory ());
+        MonitorChart.getInstance ().addData (evaluation, this.getBestEvaluation ());
+        return objectives;
     }
 
     private double computeLength (Coordinates [] trajectory)

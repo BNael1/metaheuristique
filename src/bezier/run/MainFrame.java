@@ -17,7 +17,7 @@ import org.jfree.chart.plot.XYPlot;
 public class MainFrame extends JFrame
 {
 	
-	public static final double UI_SCALE = Toolkit.getDefaultToolkit().getScreenResolution() / 96.0;
+	public static final double UI_SCALE = Toolkit.getDefaultToolkit().getScreenResolution() / 120.0;
     private static final long serialVersionUID = 1L;
     private static MainFrame instance = null;
 
@@ -25,8 +25,8 @@ public class MainFrame extends JFrame
     {
         this.setLayout (new BorderLayout ());
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        int width  = (int)(screen.width  * 0.3);
-        int height = (int)(screen.height * 0.4);
+        int height = (int)(screen.height * 0.75);
+        int width  = (int)(height * 3.0 / 4.0);
         this.setSize(width, height);
         this.setSize (width, height);
         this.setLocationRelativeTo (null);

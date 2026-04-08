@@ -1,4 +1,4 @@
-package bezier2_0.projects.competitor.optipath;
+package bezier.projects.competitor.optipath;
 
 /**
  * Micro-tests sans framework pour valider les diagnostics de carte.

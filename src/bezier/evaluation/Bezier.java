@@ -190,7 +190,7 @@ class PascalTriangle
 {
 	private static final ArrayList<long[]> triangle = new ArrayList<>();
 
-	private static synchronized void compute_line(int n)
+	private static void compute_line(int n)
 	{
 		if (triangle.size() < n-1)
 			compute_line(n-1);
@@ -206,7 +206,7 @@ class PascalTriangle
 	 * @param k
 	 * @return k parmi n
 	 */
-	static synchronized long binomial(int n, int k)
+	static long binomial(int n, int k)
 	{
 
 		if (n < 0 || k < 0 ) return 0;

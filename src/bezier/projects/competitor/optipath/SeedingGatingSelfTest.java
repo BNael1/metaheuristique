@@ -1,4 +1,4 @@
-package bezier2_0.projects.competitor.optipath;
+package bezier.projects.competitor.optipath;
 
 /**
  * Validation du gating anti-overfit des seeds specialises zigzag.

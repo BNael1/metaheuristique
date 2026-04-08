@@ -3,7 +3,12 @@ package bezier.projects.competitor.optipath;
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;
 import bezier.projects.InvalidProjectException;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.PriorityQueue;
 import java.util.Random;
 
@@ -23,12 +28,11 @@ public class OptiPath extends CompetitorProject
     // ================================================================
     private double marginSmall;
     private double marginWide;
-    private static final long TOTAL_TIME_MS = 58_000;
+    private static final long TOTAL_TIME_MS = 60_000;
     private static final long RESTART_CHECK_EVERY_MS = 200;
     private static final long RESCUE_START_MS = 8_000;
     private static final long RESCUE_PERIOD_MS = 1_500;
     private static final int RESCUE_BURST_TRIES = 28;
-    private static final int FEASIBILITY_SAMPLES = 128;
 
     /** Fraction du temps pour le seeding initial. */
     private static final double SEED_RATIO = 0.10;
@@ -49,6 +53,8 @@ public class OptiPath extends CompetitorProject
     private double globalBestFitness;
     private Random rng;
     private boolean stepSmallNext;
+    /** Fraction de budget effectivement allouee au seeding (adaptative). */
+    private double seedRatioBudget;
 
     /** Timestamp du dernier lancement/restart CMA-ES. */
     private long lastRestartTime;
@@ -79,7 +85,9 @@ public class OptiPath extends CompetitorProject
     private double bestFeasibleFitness;
     /** Parametres de micro-affinage local du meilleur faisable. */
     private double refineSigma;
+    private double incumbentRefineSigma;
     private long lastRefineMs;
+    private long lastIncumbentRefineMs;
     /** Timestamp du dernier gain global et du dernier burst de rescue. */
     private long lastGlobalImproveMs;
     private long lastRescueBurstMs;
@@ -90,6 +98,13 @@ public class OptiPath extends CompetitorProject
     private double pathComplexity;
     /** Seed A* garde comme fallback garanti pour les restarts. */
     private double [] aStarSeed;
+    /** Waypoints extraits du path A* pour rescue structurel. */
+    private double [][] aStarWaypoints;
+    /** Diagnostic structurel de carte (calcule une fois au demarrage). */
+    private MapDiagnostics mapDiagnostics;
+    /** Contexte d'annotation des seeds pendant le seeding massif. */
+    private SeedFamily currentSeedFamily;
+    private ArrayList<SeedFamily> activeSeedFamilies;
 
     // Seeding : top seeds + optim locale
     private ArrayList<double []> topSeeds;
@@ -100,6 +115,75 @@ public class OptiPath extends CompetitorProject
     private int localEvals;
     private static final int LOCAL_BUDGET_PER_SEED = 200;
 
+    // Archive faisable diversifiee pour restart mean plus generique
+    private static final int FEASIBLE_ARCHIVE_MAX = 24;
+    private final ArrayList<double []> feasibleArchive = new ArrayList<> ();
+    private final ArrayList<Double> feasibleArchiveFitness = new ArrayList<> ();
+
+    private static final class RankedArchiveEntry
+    {
+        final double [] x;
+        final double fitness;
+
+        RankedArchiveEntry (double [] x, double fitness)
+        {
+            this.x = x;
+            this.fitness = fitness;
+        }
+    }
+
+    private void loadObstaclesFromDataFile ()
+    {
+        File file = new File ("data", problem.getName () + ".bzr");
+        if (!file.exists ())
+        {
+            this.nObs = 0;
+            this.obsX = new double [0];
+            this.obsY = new double [0];
+            this.obsR = new double [0];
+            return;
+        }
+
+        ArrayList<Double> xs = new ArrayList<> ();
+        ArrayList<Double> ys = new ArrayList<> ();
+        ArrayList<Double> rs = new ArrayList<> ();
+
+        try (BufferedReader in = new BufferedReader (new FileReader (file)))
+        {
+            for (int i = 0; i < 4; i++)
+                if (in.readLine () == null) break;
+
+            String line;
+            while ((line = in.readLine ()) != null)
+            {
+                String [] tokens = line.split (",");
+                if (tokens.length < 3) continue;
+                xs.add (Double.parseDouble (tokens [0].trim ()));
+                ys.add (Double.parseDouble (tokens [1].trim ()));
+                rs.add (Double.parseDouble (tokens [2].trim ()));
+            }
+        }
+        catch (IOException | NumberFormatException e)
+        {
+            this.nObs = 0;
+            this.obsX = new double [0];
+            this.obsY = new double [0];
+            this.obsR = new double [0];
+            return;
+        }
+
+        this.nObs = xs.size ();
+        this.obsX = new double [this.nObs];
+        this.obsY = new double [this.nObs];
+        this.obsR = new double [this.nObs];
+        for (int i = 0; i < this.nObs; i++)
+        {
+            this.obsX [i] = xs.get (i);
+            this.obsY [i] = ys.get (i);
+            this.obsR [i] = rs.get (i);
+        }
+    }
+
     // ================================================================
     //  CONSTRUCTEURS
     // ================================================================
@@ -109,7 +193,7 @@ public class OptiPath extends CompetitorProject
         this (problem, 5.0, 15.0, new TimePhasedFocusRestart ());
     }
 
-    public OptiPath (Problem problem, OuterRestartStrategy strategy)
+    OptiPath (Problem problem, OuterRestartStrategy strategy)
             throws InvalidProjectException
     {
         this (problem, 5.0, 15.0, strategy);
@@ -141,27 +225,31 @@ public class OptiPath extends CompetitorProject
         bestFeasibleFitness = Double.POSITIVE_INFINITY;
         bestFeasibleX = null;
         stepSmallNext = true;
+        seedRatioBudget = SEED_RATIO;
         restartCount = 0;
         lastGlobalImproveMs = startTime;
         lastRescueBurstMs = 0L;
         lastRefineMs = 0L;
+        lastIncumbentRefineMs = 0L;
         detectedWaypoints = null;
         pathComplexity = 1.0;
         aStarSeed = null;
+        aStarWaypoints = null;
+        mapDiagnostics = null;
+        currentSeedFamily = SeedFamily.GENERIC;
+        activeSeedFamilies = null;
+        feasibleArchive.clear ();
+        feasibleArchiveFitness.clear ();
 
         nCP = problem.getNControlPoints ();
         d = 2 * nCP;
-        nObs = problem.getNObstacles ();
-        obsX = new double [nObs];
-        obsY = new double [nObs];
-        obsR = new double [nObs];
-        for (int i = 0; i < nObs; i++)
-        {
-            bezier.evaluation.Obstacle o = problem.getObstacle (i);
-            obsX[i] = o.getX ();
-            obsY[i] = o.getY ();
-            obsR[i] = o.getRadius ();
-        }
+        loadObstaclesFromDataFile ();
+        mapDiagnostics = MapDiagnostics.compute (
+                problem.getStartPoint ().getX (), problem.getStartPoint ().getY (),
+                problem.getEndPoint ().getX (), problem.getEndPoint ().getY (),
+                problem.getMinX (), problem.getMinY (),
+                problem.getMaxX (), problem.getMaxY (),
+                obsX, obsY, obsR);
         // Adapter les marges : réduire pour petits domaines, garder >=5/15 sinon
         double domSize = Math.max (problem.getMaxX () - problem.getMinX (),
                                     problem.getMaxY () - problem.getMinY ());
@@ -183,6 +271,7 @@ public class OptiPath extends CompetitorProject
                                  problem.getMaxY () - problem.getMinY ());
         if (domainDiag <= 0.0) domainDiag = 1.0;
         refineSigma = domainDiag * 0.01;
+        incumbentRefineSigma = domainDiag * 0.012;
         lastRestartCheckMs = 0L;
         lastCtxSnapshotMs = 0L;
         lastBestSmall = Double.POSITIVE_INFINITY;
@@ -190,7 +279,16 @@ public class OptiPath extends CompetitorProject
         lastEvalSmall = 0;
         lastEvalWide = 0;
 
+        if (mapDiagnostics != null)
+        {
+            if (mapDiagnostics.shouldEnableSpecializedZigzag ())
+                seedRatioBudget = 0.16;
+            else if (mapDiagnostics.hasStrongStructure ())
+                seedRatioBudget = 0.14;
+        }
+
         massiveSeed ();
+        bootstrapFeasibleSearchIfNeeded ();
 
         localOptIdx = 0;
         if (!topSeeds.isEmpty ())
@@ -212,12 +310,17 @@ public class OptiPath extends CompetitorProject
 
         ArrayList<double []> allSeeds = new ArrayList<> ();
         ArrayList<Double> allFitness = new ArrayList<> ();
+        activeSeedFamilies = new ArrayList<> ();
+        currentSeedFamily = SeedFamily.GENERIC;
+        boolean allowSpecializedZigzag = mapDiagnostics != null && mapDiagnostics.shouldEnableSpecializedZigzag ();
 
         // Fast-path : sans obstacles, le chemin optimal est la ligne droite
         if (nObs == 0)
         {
+            currentSeedFamily = SeedFamily.LINEAR_GRID;
             double [] straight = defaultMean ();
             addSeed (allSeeds, allFitness, straight);
+            currentSeedFamily = SeedFamily.RANDOM;
             for (int r = 0; r < 15; r++)
             {
                 double [] p = straight.clone ();
@@ -225,11 +328,7 @@ public class OptiPath extends CompetitorProject
                     p[i] += rng.nextGaussian () * domainDiag * (0.005 + 0.01 * r);
                 addSeed (allSeeds, allFitness, p);
             }
-            topSeeds = new ArrayList<> ();
-            topSeeds.add (straight);
-            globalBestX = straight.clone ();
-            seedStats = new SeedingStats (allFitness.get (0), allFitness.get (0), 0.0, allFitness.get (0));
-            restartStrategy.init (seedStats);
+            finalizeSeedPortfolio (allSeeds, allFitness);
             return;
         }
 
@@ -241,11 +340,13 @@ public class OptiPath extends CompetitorProject
                            problem.getMaxY ()-2, problem.getMaxY (), ubWide[1]-2, ubWide[1]};
 
         // 1. Grille x constant, y constant
+        currentSeedFamily = SeedFamily.LINEAR_GRID;
         for (double xv : xVals)
             for (double yv : yVals)
                 addSeed (allSeeds, allFitness, makePath (xv, yv));
 
         // 2. Alternance X extreme
+        currentSeedFamily = SeedFamily.ZIGZAG_GENERIC;
         for (double y1 : yVals)
             for (double y2 : yVals)
             {
@@ -257,6 +358,7 @@ public class OptiPath extends CompetitorProject
             }
 
         // 3. Lignes a differentes hauteurs
+        currentSeedFamily = SeedFamily.LINEAR_GRID;
         for (double yy : yVals)
         {
             double [] p = new double [d];
@@ -266,6 +368,7 @@ public class OptiPath extends CompetitorProject
         }
 
         // 4. Sinusoides
+        currentSeedFamily = SeedFamily.SINUSOIDAL;
         double halfY = (ubWide[1]-lbWide[1]) / 2.0;
         double centerY = (lbWide[1]+ubWide[1]) / 2.0;
         for (double per : new double[]{0.5,1.0,1.5,2.0})
@@ -279,6 +382,7 @@ public class OptiPath extends CompetitorProject
                 }
 
         // 5. Aleatoires
+        currentSeedFamily = SeedFamily.RANDOM;
         for (int r = 0; r < 80; r++)
         {
             double [] p = new double [d];
@@ -287,70 +391,293 @@ public class OptiPath extends CompetitorProject
         }
 
         // 6. Zigzags : alternance haut/bas le long du chemin start→end
-        for (double yH : yVals)
-            for (double yL : yVals)
-            {
-                if (Math.abs (yH - yL) < 4.0) continue;
-                for (int flip = 0; flip < 2; flip++)
+        if (allowSpecializedZigzag
+                || (mapDiagnostics != null && mapDiagnostics.hasStrongStructure ())
+                || (mapDiagnostics != null && mapDiagnostics.pathStretch >= 1.15))
+        {
+            currentSeedFamily = SeedFamily.ZIGZAG_GENERIC;
+            for (double yH : yVals)
+                for (double yL : yVals)
                 {
-                    double [] p = new double [d];
-                    for (int i = 0; i < nCP; i++)
+                    if (Math.abs (yH - yL) < 4.0) continue;
+                    for (int flip = 0; flip < 2; flip++)
                     {
-                        double t = (double)(i+1) / (nCP+1);
-                        p[2*i] = sx + t * (ex - sx);
-                        p[2*i+1] = ((i % 2 == flip) ? yH : yL);
+                        double [] p = new double [d];
+                        for (int i = 0; i < nCP; i++)
+                        {
+                            double t = (double)(i+1) / (nCP+1);
+                            p[2*i] = sx + t * (ex - sx);
+                            p[2*i+1] = ((i % 2 == flip) ? yH : yL);
+                        }
+                        addSeed (allSeeds, allFitness, p);
                     }
-                    addSeed (allSeeds, allFitness, p);
                 }
-            }
+        }
 
         // 7. Obstacle-aware : detection de murs et routage par les gaps
+        currentSeedFamily = SeedFamily.OBSTACLE_AWARE;
         addObstacleAwareSeeds (allSeeds, allFitness, sx, sy, ex, ey);
 
         // 7b. Detour seeds : contournement d'obstacles bloquant le chemin direct
+        currentSeedFamily = SeedFamily.DETOUR;
         addDetourSeeds (allSeeds, allFitness, sx, sy, ex, ey);
 
         // 8. Seed deterministe via A* sur grille (garde-fou anti-catastrophe)
+        currentSeedFamily = SeedFamily.GRID_ASTAR;
         addGridPlannerSeeds (allSeeds, allFitness, sx, sy, ex, ey);
 
-        // Trier et garder top-20
-        Integer [] idx = new Integer [allSeeds.size ()];
-        for (int i = 0; i < idx.length; i++) idx[i] = i;
-        java.util.Arrays.sort (idx, (a,b) -> Double.compare (allFitness.get(a), allFitness.get(b)));
-
-        topSeeds = new ArrayList<> ();
-        for (int i = 0; i < Math.min (20, idx.length); i++)
-            topSeeds.add (allSeeds.get (idx[i]).clone ());
-
-        // Initialiser globalBestX avec le meilleur seed pour que le best-ever
-        // restart fonctionne meme si CMA-ES ne s'ameliore jamais
-        if (!topSeeds.isEmpty ())
-            globalBestX = topSeeds.get (0).clone ();
-
-        // Calculer SeedingStats pour les strategies adaptatives
-        int n = allFitness.size ();
-        double [] sorted = new double [n];
-        for (int i = 0; i < n; i++) sorted[i] = allFitness.get (idx[i]);
-        double best = sorted[0];
-        double median = sorted[n / 2];
-        double p25 = sorted[n / 4];
-        double mean = 0;
-        for (double v : sorted) mean += v;
-        mean /= n;
-        double variance = 0;
-        for (double v : sorted) variance += (v - mean) * (v - mean);
-        variance /= n;
-        seedStats = new SeedingStats (best, median, Math.sqrt (variance), p25);
-        restartStrategy.init (seedStats);
-
+        finalizeSeedPortfolio (allSeeds, allFitness);
     }
 
     private void addSeed (ArrayList<double []> seeds, ArrayList<Double> fits, double [] p)
     {
         clamp (p);
         double f = evaluateAndTrack (p);
-        seeds.add (p);
+        seeds.add (p.clone ());
         fits.add (f);
+        if (activeSeedFamilies != null)
+            activeSeedFamilies.add (currentSeedFamily != null ? currentSeedFamily : SeedFamily.GENERIC);
+    }
+
+    private void finalizeSeedPortfolio (ArrayList<double []> allSeeds, ArrayList<Double> allFitness)
+    {
+        if (allSeeds.isEmpty ())
+        {
+            topSeeds = new ArrayList<> ();
+            topSeeds.add (defaultMean ());
+            globalBestX = topSeeds.get (0).clone ();
+            double baseline = evaluateAndTrack (topSeeds.get (0));
+            seedStats = new SeedingStats (baseline, baseline, 0.0, baseline);
+            restartStrategy.init (seedStats);
+            activeSeedFamilies = null;
+            return;
+        }
+
+        SeedPortfolio portfolio = new SeedPortfolio (d);
+        for (int i = 0; i < allSeeds.size (); i++)
+        {
+            SeedFamily fam = (activeSeedFamilies != null && i < activeSeedFamilies.size ())
+                    ? activeSeedFamilies.get (i)
+                    : SeedFamily.GENERIC;
+            portfolio.add (fam, allSeeds.get (i), allFitness.get (i));
+        }
+
+        EnumMap<SeedFamily, Integer> caps = buildDynamicFamilyCaps (20);
+        double diversityThreshold = computeSeedDiversityThreshold ();
+        ArrayList<SeedCandidate> selected = portfolio.selectTopDiverse (20, diversityThreshold, caps);
+
+        if (selected.isEmpty ())
+        {
+            ArrayList<Integer> idx = new ArrayList<> ();
+            for (int i = 0; i < allSeeds.size (); i++) idx.add (i);
+            idx.sort ((a, b) -> Double.compare (allFitness.get (a), allFitness.get (b)));
+            selected = new ArrayList<> ();
+            int lim = Math.min (20, idx.size ());
+            for (int i = 0; i < lim; i++)
+            {
+                int id = idx.get (i);
+                SeedFamily fam = (activeSeedFamilies != null && id < activeSeedFamilies.size ())
+                        ? activeSeedFamilies.get (id)
+                        : SeedFamily.GENERIC;
+                selected.add (new SeedCandidate (fam, allSeeds.get (id).clone (), allFitness.get (id)));
+            }
+        }
+
+        selected.sort ((a, b) -> Double.compare (a.fitness, b.fitness));
+        topSeeds = new ArrayList<> ();
+        for (SeedCandidate c : selected)
+            topSeeds.add (c.vector.clone ());
+
+        if (!topSeeds.isEmpty ())
+            globalBestX = topSeeds.get (0).clone ();
+
+        double [] sorted = new double [allFitness.size ()];
+        for (int i = 0; i < allFitness.size (); i++) sorted[i] = allFitness.get (i);
+        java.util.Arrays.sort (sorted);
+        double best = sorted[0];
+        double median = sorted[sorted.length / 2];
+        double p25 = sorted[sorted.length / 4];
+        double mean = 0.0;
+        for (double v : sorted) mean += v;
+        mean /= sorted.length;
+        double variance = 0.0;
+        for (double v : sorted) variance += (v - mean) * (v - mean);
+        variance /= sorted.length;
+        seedStats = new SeedingStats (best, median, Math.sqrt (variance), p25);
+        restartStrategy.init (seedStats);
+
+        activeSeedFamilies = null;
+    }
+
+    private EnumMap<SeedFamily, Integer> buildDynamicFamilyCaps (int totalCap)
+    {
+        EnumMap<SeedFamily, Integer> caps = new EnumMap<> (SeedFamily.class);
+
+        // Base neutre, robuste sur problemes heterogenes
+        caps.put (SeedFamily.LINEAR_GRID, 6);
+        caps.put (SeedFamily.RANDOM, 5);
+        caps.put (SeedFamily.SINUSOIDAL, 4);
+        caps.put (SeedFamily.ZIGZAG_GENERIC, 2);
+        caps.put (SeedFamily.OBSTACLE_AWARE, 5);
+        caps.put (SeedFamily.DETOUR, 4);
+        caps.put (SeedFamily.GRID_ASTAR, 4);
+        caps.put (SeedFamily.SPECIALIZED_ZIGZAG, 1);
+        caps.put (SeedFamily.GENERIC, 4);
+
+        if (mapDiagnostics == null)
+            return caps;
+
+        if (mapDiagnostics.pathStretch >= 1.4)
+        {
+            caps.put (SeedFamily.GRID_ASTAR, 6);
+            caps.put (SeedFamily.DETOUR, 5);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 6);
+        }
+
+        if (mapDiagnostics.wallAlignmentConfidence < 0.30)
+        {
+            caps.put (SeedFamily.ZIGZAG_GENERIC, 1);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 4);
+            caps.put (SeedFamily.SINUSOIDAL, 5);
+        }
+
+        if (mapDiagnostics.shouldEnableSpecializedZigzag ())
+        {
+            // Cas peigne/zigzag alterne: prioriser les familles structurelles.
+            caps.put (SeedFamily.SPECIALIZED_ZIGZAG, 6);
+            caps.put (SeedFamily.ZIGZAG_GENERIC, 5);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 8);
+            caps.put (SeedFamily.DETOUR, 6);
+            caps.put (SeedFamily.GRID_ASTAR, 6);
+            caps.put (SeedFamily.LINEAR_GRID, 3);
+            caps.put (SeedFamily.SINUSOIDAL, 2);
+            caps.put (SeedFamily.RANDOM, 2);
+        }
+        else if (mapDiagnostics.hasStrongStructure ())
+        {
+            // Cas labyrinthiques non alternants (ex: spirale).
+            caps.put (SeedFamily.OBSTACLE_AWARE, 8);
+            caps.put (SeedFamily.DETOUR, 6);
+            caps.put (SeedFamily.GRID_ASTAR, 6);
+            caps.put (SeedFamily.ZIGZAG_GENERIC, 3);
+            caps.put (SeedFamily.SINUSOIDAL, 2);
+            caps.put (SeedFamily.RANDOM, 2);
+        }
+        else
+        {
+            caps.put (SeedFamily.SPECIALIZED_ZIGZAG, 0);
+        }
+
+        // Bornes de securite
+        for (SeedFamily family : SeedFamily.values ())
+        {
+            int v = caps.getOrDefault (family, 0);
+            caps.put (family, Math.max (0, Math.min (totalCap, v)));
+        }
+        return caps;
+    }
+
+    private double computeSeedDiversityThreshold ()
+    {
+        if (mapDiagnostics == null)
+            return Math.max (0.12, domainDiag * 0.008);
+
+        double stretch = Math.max (1.0, mapDiagnostics.pathStretch);
+        double byStretch = domainDiag * (0.004 + 0.001 * Math.min (2.0, stretch - 1.0));
+        double byCorridor = Math.max (0.05, mapDiagnostics.estimatedCorridorWidth * 0.8);
+        double threshold = Math.max (byStretch, byCorridor);
+
+        // Dans des corridors etroits, on laisse davantage de seeds proches coexister.
+        if (mapDiagnostics.estimatedCorridorWidth < 0.6)
+            threshold = Math.min (threshold, 0.30);
+
+        return Math.min (domainDiag * 0.01, Math.max (0.05, threshold));
+    }
+
+    private void bootstrapFeasibleSearchIfNeeded ()
+    {
+        if (bestFeasibleX != null) return;
+
+        long now = System.currentTimeMillis ();
+        long hardCap = now + 1_500L;
+        long seedPhaseCap = startTime + (long) (TOTAL_TIME_MS * Math.max (SEED_RATIO, seedRatioBudget));
+        long deadline = Math.min (hardCap, seedPhaseCap);
+        if (deadline <= now) return;
+
+        int restart = 0;
+        while (bestFeasibleX == null && System.currentTimeMillis () < deadline)
+        {
+            double [] cur = (restart % 2 == 0)
+                    ? randomLinePerturbationSeed ()
+                    : sampleFeasibilityStart (defaultMean (), restart);
+            restart++;
+            double curF = evaluateAndTrack (cur);
+            double step = 3.0;
+            int successes = 0;
+            int window = 0;
+
+            while (window < 420 && bestFeasibleX == null && System.currentTimeMillis () < deadline)
+            {
+                double [] trial = cur.clone ();
+                int edits = 1 + rng.nextInt (Math.max (2, nCP / 2));
+                for (int e = 0; e < edits; e++)
+                {
+                    int cp = rng.nextInt (nCP);
+                    int ix = 2 * cp;
+                    trial[ix] += rng.nextGaussian () * step;
+                    trial[ix + 1] += rng.nextGaussian () * step;
+                }
+                repelControlPointsFromObstacles (trial, 1);
+                clamp (trial);
+                double f = evaluateAndTrack (trial);
+                if (f + 1e-9 < curF)
+                {
+                    cur = trial;
+                    curF = f;
+                    successes++;
+                }
+                window++;
+                if (window % 40 == 0)
+                {
+                    double rate = successes / 40.0;
+                    if (rate > 0.22) step *= 1.10;
+                    else step *= 0.82;
+                    step = Math.max (0.08, Math.min (6.0, step));
+                    successes = 0;
+                }
+            }
+        }
+
+        if (bestFeasibleX != null)
+        {
+            if (topSeeds == null) topSeeds = new ArrayList<> ();
+            topSeeds.add (0, bestFeasibleX.clone ());
+            while (topSeeds.size () > 20)
+                topSeeds.remove (topSeeds.size () - 1);
+            if (bestFeasibleFitness < globalBestFitness)
+            {
+                globalBestFitness = bestFeasibleFitness;
+                globalBestX = bestFeasibleX.clone ();
+                lastGlobalImproveMs = System.currentTimeMillis ();
+            }
+        }
+    }
+
+    private double [] randomLinePerturbationSeed ()
+    {
+        double sx = problem.getStartPoint ().getX ();
+        double sy = problem.getStartPoint ().getY ();
+        double ex = problem.getEndPoint ().getX ();
+        double ey = problem.getEndPoint ().getY ();
+        double [] p = new double [d];
+        for (int i = 0; i < nCP; i++)
+        {
+            double t = (double) (i + 1) / (nCP + 1);
+            p[2 * i] = sx + t * (ex - sx) + rng.nextGaussian () * 8.0;
+            p[2 * i + 1] = sy + t * (ey - sy) + rng.nextGaussian () * 8.0;
+        }
+        clamp (p);
+        return p;
     }
 
     // ================================================================
@@ -362,7 +689,7 @@ public class OptiPath extends CompetitorProject
         long elapsed = System.currentTimeMillis () - startTime;
         double ratio = (double) elapsed / TOTAL_TIME_MS;
 
-        if (!cmaesReady && ratio < SEED_RATIO)
+        if (!cmaesReady && ratio < seedRatioBudget)
         {
             doLocalOptStep ();
             return;
@@ -374,13 +701,14 @@ public class OptiPath extends CompetitorProject
         maybeCheckExternalRestart ();
         maybeRescueFeasibility ();
 
-        // Alterner small/wide
+        // Alterner small/wide pour stabiliser la progression inter-runs.
         if (stepSmallNext) cmaesSmall.step ();
         else cmaesWide.step ();
         stepSmallNext = !stepSmallNext;
+        maybeRefineIncumbent ();
         maybeRefineElite ();
 
-        // Tracker le meilleur (CMA-ES met a jour problem en interne)
+        // Tracker le meilleur (CMA-ES met a jour problem en interne via evaluate)
         double prev = globalBestFitness;
         globalBestFitness = Math.min (globalBestFitness, problem.getBestEvaluation ());
         if (globalBestFitness < prev)
@@ -398,6 +726,14 @@ public class OptiPath extends CompetitorProject
         }
     }
 
+    private double weakFeasibleThreshold ()
+    {
+        double threshold = 50.0 * domainDiag;
+        if (seedStats != null && Double.isFinite (seedStats.percentile25))
+            threshold = Math.max (threshold, 1.5 * seedStats.percentile25);
+        return threshold;
+    }
+
     private void maybeCheckExternalRestart ()
     {
         long now = System.currentTimeMillis ();
@@ -405,10 +741,12 @@ public class OptiPath extends CompetitorProject
             return;
 
         // Filet de securite : si apres 30s le score est encore tres mauvais,
-        // forcer un restart depuis le seed A*
+        // forcer un restart depuis le seed A* sous stagnation + difficulte de faisabilite.
         long elapsed = now - startTime;
-        if (aStarSeed != null && elapsed > 30_000L
-                && bestFeasibleFitness > 2.0 * domainDiag)
+        boolean stagnating = (now - lastGlobalImproveMs) > 7_000L;
+        boolean weakFeasible = (bestFeasibleX == null)
+                || (bestFeasibleFitness > weakFeasibleThreshold ());
+        if (aStarSeed != null && elapsed > 20_000L && stagnating && weakFeasible)
         {
             globalBestX = aStarSeed.clone ();
             restartCount++;
@@ -611,63 +949,101 @@ public class OptiPath extends CompetitorProject
      */
     private double [] pickRestartMean ()
     {
-        if (topSeeds == null || topSeeds.isEmpty ())
+        boolean hasTopSeeds = topSeeds != null && !topSeeds.isEmpty ();
+        boolean hasArchive = !feasibleArchive.isEmpty ();
+        if (!hasTopSeeds && !hasArchive)
             return defaultMean ();
 
-        // Si le bassin courant est nettement pire que le best-ever global,
-        // repartir pres du best-ever (critere relatif, robuste a l'echelle/signe).
         double [] anchorBest = (bestFeasibleX != null) ? bestFeasibleX : globalBestX;
         double basinBest = Double.POSITIVE_INFINITY;
         if (cmaesSmall != null) basinBest = Math.min (basinBest, cmaesSmall.getBestFitness ());
         if (cmaesWide != null) basinBest = Math.min (basinBest, cmaesWide.getBestFitness ());
         if (!Double.isFinite (basinBest)) basinBest = fitnessAtLaunch;
-        double relGap = (basinBest - globalBestFitness)
-                / (Math.abs (globalBestFitness) + 1e-9);
+
+        long now = System.currentTimeMillis ();
+        boolean stagnating = (now - lastGlobalImproveMs) > 4_500L;
+        boolean weakFeasible = (bestFeasibleX == null)
+                || !Double.isFinite (bestFeasibleFitness)
+                || bestFeasibleFitness > weakFeasibleThreshold ();
+
+        // Fallback A* : seulement sous stagnation + difficulte de faisabilite.
+        if (aStarSeed != null && (weakFeasible || (stagnating && basinBest > weakFeasibleThreshold ())))
+            return noisyClone (aStarSeed, 0.015);
+
+        double relGap = (basinBest - globalBestFitness) / (Math.abs (globalBestFitness) + 1e-9);
         if (anchorBest != null && relGap > 2.0)
+            return noisyClone (anchorBest, 0.02);
+
+        if (hasArchive)
         {
-            double [] p = anchorBest.clone ();
-            double noise = domainDiag * 0.02;
-            for (int i = 0; i < d; i++)
-                p[i] += rng.nextGaussian () * noise;
-            clamp (p);
-            return p;
+            double exploreProb = stagnating ? 0.55 : 0.30;
+            RankedArchiveEntry choice = (rng.nextDouble () < (1.0 - exploreProb))
+                    ? sampleArchiveExploit ()
+                    : sampleArchiveExplore (anchorBest);
+            if (choice != null)
+                return noisyClone (choice.x, stagnating ? 0.035 : 0.025);
         }
 
-        // Fallback A* : utiliser le seed A* regulierement et quand la qualite est mauvaise
-        if (aStarSeed != null && (basinBest > 3.0 * domainDiag
-                || (bestFeasibleX == null && restartCount > 2)
-                || (restartCount % 3 == 2)))
+        if (hasTopSeeds)
         {
-            double [] p = aStarSeed.clone ();
-            double noise = domainDiag * 0.015;
-            for (int i = 0; i < d; i++)
-                p[i] += rng.nextGaussian () * noise;
-            clamp (p);
-            return p;
+            int topK = Math.min (5, topSeeds.size ());
+            int idx = rng.nextInt (Math.max (1, topK));
+            return noisyClone (topSeeds.get (idx), 0.03);
         }
 
-        // 1 restart sur 2 : repartir pres du meilleur resultat global
-        if (restartCount % 2 == 1 && anchorBest != null)
-        {
-            double [] p = anchorBest.clone ();
-            double noise = domainDiag * 0.03;
-            for (int i = 0; i < d; i++)
-                p[i] += rng.nextGaussian () * noise;
-            clamp (p);
-            return p;
-        }
-
-        // Premier lancement : meilleur seed
-        // Restarts suivants : cycler parmi les top seeds + aleatoires
-        int seedIdx = restartCount % (topSeeds.size () + 2);
-
-        if (seedIdx < topSeeds.size ())
-            return topSeeds.get (seedIdx).clone ();
-
-        // Seeds aleatoires dans les bornes etendues pour diversite
         double [] p = new double [d];
         for (int i = 0; i < d; i++)
             p[i] = lbWide[i] + rng.nextDouble () * (ubWide[i] - lbWide[i]);
+        clamp (p);
+        return p;
+    }
+
+    private RankedArchiveEntry sampleArchiveExploit ()
+    {
+        if (feasibleArchive.isEmpty ()) return null;
+        ArrayList<RankedArchiveEntry> ranked = buildRankedArchive ();
+        int topK = Math.min (Math.max (1, ranked.size ()), 5);
+        // Tirage biaise vers les meilleurs rangs.
+        double sum = 0.0;
+        for (int i = 0; i < topK; i++) sum += 1.0 / (1.0 + i);
+        double r = rng.nextDouble () * sum;
+        double acc = 0.0;
+        for (int i = 0; i < topK; i++)
+        {
+            acc += 1.0 / (1.0 + i);
+            if (r <= acc) return ranked.get (i);
+        }
+        return ranked.get (0);
+    }
+
+    private RankedArchiveEntry sampleArchiveExplore (double [] anchor)
+    {
+        if (feasibleArchive.isEmpty ()) return null;
+        ArrayList<RankedArchiveEntry> ranked = buildRankedArchive ();
+        if (anchor == null) return ranked.get (rng.nextInt (ranked.size ()));
+
+        ranked.sort ((a, b) -> Double.compare (
+                distanceNorm (b.x, anchor),
+                distanceNorm (a.x, anchor)));
+        int k = Math.min (Math.max (1, ranked.size ()), 5);
+        return ranked.get (rng.nextInt (k));
+    }
+
+    private ArrayList<RankedArchiveEntry> buildRankedArchive ()
+    {
+        ArrayList<RankedArchiveEntry> ranked = new ArrayList<> ();
+        for (int i = 0; i < feasibleArchive.size (); i++)
+            ranked.add (new RankedArchiveEntry (feasibleArchive.get (i), feasibleArchiveFitness.get (i)));
+        ranked.sort ((a, b) -> Double.compare (a.fitness, b.fitness));
+        return ranked;
+    }
+
+    private double [] noisyClone (double [] base, double sigmaRatio)
+    {
+        double [] p = base.clone ();
+        double noise = domainDiag * sigmaRatio;
+        for (int i = 0; i < d; i++)
+            p[i] += rng.nextGaussian () * noise;
         clamp (p);
         return p;
     }
@@ -684,16 +1060,14 @@ public class OptiPath extends CompetitorProject
                                          ArrayList<Double> fits,
                                          double sx, double sy, double ex, double ey)
     {
-        int nObs = problem.getNObstacles ();
+        int nObs = this.nObs;
         if (nObs < 3) return;
 
         // Collecter les obstacles
         double [] ox = new double [nObs], oy = new double [nObs], or_ = new double [nObs];
-        for (int i = 0; i < nObs; i++)
-        {
-            bezier.evaluation.Obstacle o = problem.getObstacle (i);
-            ox[i] = o.getX (); oy[i] = o.getY (); or_[i] = o.getRadius ();
-        }
+        System.arraycopy (this.obsX, 0, ox, 0, nObs);
+        System.arraycopy (this.obsY, 0, oy, 0, nObs);
+        System.arraycopy (this.obsR, 0, or_, 0, nObs);
 
         // Detecter murs verticaux ET horizontaux, garder la meilleure orientation
         ArrayList<double []> vWalls = detectWalls (ox, oy, or_, nObs, true);
@@ -829,7 +1203,60 @@ public class OptiPath extends CompetitorProject
                 if (lastF < bestAwareFit) { bestAwareFit = lastF; bestAwareP = p.clone (); }
             }
         }
-        // DEBUG obstacle-aware seeds
+
+        // Consolidation locale du meilleur seed obstacle-aware pour fiabiliser
+        // les cartes structurees non-zigzag (spirales/couloirs imbriques).
+        boolean specializedZigzag = mapDiagnostics != null && mapDiagnostics.shouldEnableSpecializedZigzag ();
+        if (bestAwareP != null && pathComplexity > 1.4)
+        {
+            double [] cur = bestAwareP.clone ();
+            double curF = bestAwareFit;
+            double step = Math.max (0.7, domainDiag * 0.02);
+            int iters = specializedZigzag ? 700 : 1400;
+            int successes = 0;
+            int window = 0;
+            for (int it = 0; it < iters; it++)
+            {
+                double [] trial = cur.clone ();
+                int edits = 1 + rng.nextInt (Math.max (2, nCP / 3));
+                for (int e = 0; e < edits; e++)
+                {
+                    int cp = rng.nextInt (nCP);
+                    int ix = 2 * cp;
+                    trial[ix] += rng.nextGaussian () * step;
+                    trial[ix + 1] += rng.nextGaussian () * step;
+                }
+                repelControlPointsFromObstacles (trial, 1);
+                clamp (trial);
+                double f = evaluateAndTrack (trial);
+                if (f + 1e-9 < curF)
+                {
+                    cur = trial;
+                    curF = f;
+                    successes++;
+                }
+                window++;
+                if (window >= 200)
+                {
+                    double rate = (double) successes / window;
+                    if (rate > 0.2) step *= 1.12;
+                    else step *= 0.82;
+                    step = Math.max (0.2, Math.min (domainDiag * 0.08, step));
+                    successes = 0;
+                    window = 0;
+                }
+            }
+            addSeed (seeds, fits, cur);
+            for (int v = 0; v < 3; v++)
+            {
+                double [] q = cur.clone ();
+                double noise = (v + 1) * 0.35;
+                for (int i = 0; i < d; i++)
+                    q[i] += rng.nextGaussian () * noise;
+                addSeed (seeds, fits, q);
+            }
+        }
+
         // Strategie 2 : waypoint-clamp — assigner chaque CP au waypoint
         // le plus proche et placer PLUSIEURS CPs consecutifs au gap.
         // Ca force la courbe Bezier a passer par les gaps car
@@ -909,10 +1336,14 @@ public class OptiPath extends CompetitorProject
         // Au lieu de placer les CPs sur le zigzag (oscillations de Runge),
         // utiliser une fonction cosinus dont les CPs suivent un profil lisse
         // qui correspond naturellement au pattern haut-bas-haut des gaps.
-        if (pathComplexity > 1.8 && nCP >= 6)
+        boolean enableSpecialized = mapDiagnostics != null && mapDiagnostics.shouldEnableSpecializedZigzag ();
+        if (enableSpecialized && pathComplexity > 1.4 && nCP >= 6)
         {
+            SeedFamily prevFamily = currentSeedFamily;
+            currentSeedFamily = SeedFamily.SPECIALIZED_ZIGZAG;
             addCosineZigzagSeeds (seeds, fits, waypoints, sx, sy, ex, ey);
             addZigzagLocalOptSeeds (seeds, fits, waypoints, sx, sy, ex, ey);
+            currentSeedFamily = prevFamily;
         }
     }
 
@@ -1393,8 +1824,7 @@ public class OptiPath extends CompetitorProject
         for (double [] start : zigzagStarts)
         {
             clamp (start);
-            double curF = problem.evaluate (start);
-            trackBest (curF);
+            double curF = evaluateAndTrack (start);
             double [] cur = start.clone ();
             double step = 3.0;
 
@@ -1409,8 +1839,7 @@ public class OptiPath extends CompetitorProject
                     trial[idx] += rng.nextGaussian () * step;
                 }
                 clamp (trial);
-                double trialF = problem.evaluate (trial);
-                trackBest (trialF);
+                double trialF = evaluateAndTrack (trial);
                 if (trialF < curF)
                 {
                     cur = trial;
@@ -1672,22 +2101,7 @@ public class OptiPath extends CompetitorProject
             for (int g = 0; g < nGaps; g++)
                 deltaY[i] += A[g][i] * lambdaY[g];
 
-        // DEBUG: afficher les t-values et delta Y
-        StringBuilder dbg = new StringBuilder ("DEBUG extremeZigzag: tGap=");
-        for (int g = 0; g < nGaps; g++)
-            dbg.append (String.format ("%.3f ", tGap[g]));
-        dbg.append (" deltaY range=[");
-        double minDY = Double.MAX_VALUE, maxDY = -Double.MAX_VALUE;
-        for (int i = 0; i < nCP; i++)
-        {
-            if (deltaY[i] < minDY) minDY = deltaY[i];
-            if (deltaY[i] > maxDY) maxDY = deltaY[i];
-        }
-        dbg.append (String.format ("%.1f, %.1f", minDY, maxDY)).append ("]");
-        System.err.println (dbg.toString ());
-
         // Generer les seeds avec differentes echelles
-        double bestF = Double.POSITIVE_INFINITY;
         for (double scale : new double [] {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0})
         {
             for (int v = 0; v < 3; v++)
@@ -1700,11 +2114,8 @@ public class OptiPath extends CompetitorProject
                     p[2 * i + 1] = refY[i] + deltaY[i] * scale + noise;
                 }
                 addSeed (seeds, fits, p);
-                double lastF = fits.get (fits.size () - 1);
-                if (lastF < bestF) bestF = lastF;
             }
         }
-        System.err.println ("DEBUG extremeZigzag: bestF=" + String.format ("%.1f", bestF));
     }
 
     /** Inverse une matrice n×n par Gauss-Jordan. Retourne null si singuliere. */
@@ -2189,6 +2600,8 @@ public class OptiPath extends CompetitorProject
 
         boolean [] blocked = new boolean [grid * grid];
         double inflate = 0.8;
+        if (mapDiagnostics != null && mapDiagnostics.estimatedCorridorWidth < 1.0)
+            inflate = 0.75;
         for (int gy = 0; gy < grid; gy++)
         {
             double y = minY + gy * stepY;
@@ -2312,6 +2725,9 @@ public class OptiPath extends CompetitorProject
             p[2 * i] = x;
             p[2 * i + 1] = y;
         }
+        int repairIters = (mapDiagnostics != null && mapDiagnostics.pathStretch >= 1.6)
+                ? 280 : 120;
+        p = repairSeedForFeasibility (p, repairIters, 1.0);
         repelControlPointsFromObstacles (p, 3);
         this.aStarSeed = p.clone ();
         addSeed (seeds, fits, p);
@@ -2354,9 +2770,129 @@ public class OptiPath extends CompetitorProject
             if (keyPoints.size () >= 3)
             {
                 double [][] kpArr = keyPoints.toArray (new double [0][]);
+                this.aStarWaypoints = kpArr;
+                if (this.detectedWaypoints == null)
+                    this.detectedWaypoints = kpArr;
                 addHermiteSplineSeeds (seeds, fits, kpArr);
+                addPolylineAnchorSeeds (seeds, fits, kpArr);
+            }
+            else
+                this.aStarWaypoints = null;
+        }
+        else
+            this.aStarWaypoints = null;
+    }
+
+    /**
+     * Seeds ancrees sur les virages d'une polyline (souvent issue d'A*).
+     * Idee: clusteriser des CPs autour des coins pour limiter les coupes
+     * de virage dues au lissage Bezier de haut degre.
+     */
+    private void addPolylineAnchorSeeds (ArrayList<double []> seeds,
+                                         ArrayList<Double> fits,
+                                         double [][] waypoints)
+    {
+        if (waypoints == null || waypoints.length < 3) return;
+
+        int nWp = waypoints.length;
+        double [] cum = new double [nWp];
+        cum[0] = 0.0;
+        for (int i = 1; i < nWp; i++)
+            cum[i] = cum[i - 1] + Math.hypot (
+                    waypoints[i][0] - waypoints[i - 1][0],
+                    waypoints[i][1] - waypoints[i - 1][1]);
+        double total = cum[nWp - 1];
+        if (total < 1e-9) return;
+
+        int [] clusterRadii = (pathComplexity > 1.6)
+                ? new int [] {2, 3, 4}
+                : new int [] {1, 2, 3};
+        for (int radius : clusterRadii)
+        {
+            for (int variant = 0; variant < 2; variant++)
+            {
+                double [] p = new double [d];
+
+                // 1) Base: interpolation reguliere le long de la polyline.
+                for (int cp = 0; cp < nCP; cp++)
+                {
+                    double target = ((double) (cp + 1) / (nCP + 1)) * total;
+                    int seg = 1;
+                    while (seg < nWp && cum[seg] < target) seg++;
+                    seg = Math.max (1, Math.min (seg, nWp - 1));
+                    double den = Math.max (1e-9, cum[seg] - cum[seg - 1]);
+                    double a = (target - cum[seg - 1]) / den;
+                    p[2 * cp] = (1.0 - a) * waypoints[seg - 1][0] + a * waypoints[seg][0];
+                    p[2 * cp + 1] = (1.0 - a) * waypoints[seg - 1][1] + a * waypoints[seg][1];
+                }
+
+                // 2) Ancrage des CPs autour des virages interieurs.
+                for (int w = 1; w < nWp - 1; w++)
+                {
+                    double t = cum[w] / total;
+                    int center = (int) Math.round (t * (nCP + 1)) - 1;
+                    center = Math.max (0, Math.min (nCP - 1, center));
+                    double wx = waypoints[w][0];
+                    double wy = waypoints[w][1];
+                    for (int off = -radius; off <= radius; off++)
+                    {
+                        int cp = center + off;
+                        if (cp < 0 || cp >= nCP) continue;
+                        double frac = Math.abs (off) / (double) (radius + 1);
+                        double noise = (variant == 0) ? 0.0 : rng.nextGaussian () * 0.10 * (1.0 + frac);
+                        p[2 * cp] = wx + noise;
+                        p[2 * cp + 1] = wy + noise;
+                    }
+                }
+
+                repelControlPointsFromObstacles (p, 3);
+                clamp (p);
+                addSeed (seeds, fits, p);
             }
         }
+    }
+
+    private double [] repairSeedForFeasibility (double [] seed, int maxIters, double initStep)
+    {
+        if (seed == null) return defaultMean ();
+        double [] cur = seed.clone ();
+        clamp (cur);
+        double curF = evaluateAndTrack (cur);
+        double step = Math.max (0.2, initStep);
+        int successes = 0;
+
+        for (int it = 0; it < Math.max (0, maxIters); it++)
+        {
+            double [] trial = cur.clone ();
+            int edits = 1 + rng.nextInt (Math.max (2, nCP / 3));
+            for (int e = 0; e < edits; e++)
+            {
+                int cp = rng.nextInt (nCP);
+                int ix = 2 * cp;
+                trial[ix] += rng.nextGaussian () * step;
+                trial[ix + 1] += rng.nextGaussian () * step;
+            }
+            if (nObs > 0)
+                repelControlPointsFromObstacles (trial, 1);
+            clamp (trial);
+            double f = evaluateAndTrack (trial);
+            if (f + 1e-9 < curF)
+            {
+                cur = trial;
+                curF = f;
+                successes++;
+            }
+
+            if ((it + 1) % 40 == 0)
+            {
+                double rate = successes / 40.0;
+                if (rate > 0.22) step *= 1.10;
+                else step *= 0.82;
+                step = Math.max (0.12, Math.min (domainDiag * 0.05, step));
+                successes = 0;
+            }
+        }
+        return cur;
     }
 
     private static double heuristic (int x, int y, int tx, int ty)
@@ -2411,7 +2947,7 @@ public class OptiPath extends CompetitorProject
         boolean stalled = (now - lastGlobalImproveMs) > 5_000L;
         // Aussi considerer comme stalled si la meilleure solution faisable a un score
         // bien pire que la longueur estimee du chemin (penalites probables)
-        boolean poorQuality = (bestFeasibleFitness > 3.0 * domainDiag);
+        boolean poorQuality = (bestFeasibleFitness > weakFeasibleThreshold ());
         if (!noFeasible && !stalled && !poorQuality) return;
         long period = noFeasible ? 900L : RESCUE_PERIOD_MS;
         if (pathComplexity > 1.5) period = (long) (period / Math.min (pathComplexity, 2.0));
@@ -2426,6 +2962,22 @@ public class OptiPath extends CompetitorProject
         if (pathComplexity > 1.3)
             tries = (int) (tries * Math.min (pathComplexity, 2.0));
 
+        if (noFeasible)
+        {
+            int restarts = (elapsed > 25_000L) ? 6 : 3;
+            int hillIters = (elapsed > 25_000L) ? 260 : 140;
+            for (int r = 0; r < restarts && bestFeasibleX == null; r++)
+            {
+                double [] seed = sampleFeasibilityStart (base, r);
+                repairSeedForFeasibility (seed, hillIters, Math.max (0.5, domainDiag * 0.03));
+            }
+            if (bestFeasibleX != null)
+            {
+                lastRescueBurstMs = now;
+                return;
+            }
+        }
+
         for (int k = 0; k < tries; k++)
         {
             double [] p;
@@ -2434,6 +2986,10 @@ public class OptiPath extends CompetitorProject
             if (detectedWaypoints != null && pathComplexity > 1.3 && (k % 3) == 1)
             {
                 p = generateWaypointRescueSeed ();
+            }
+            else if (noFeasible && aStarWaypoints != null && aStarWaypoints.length >= 3 && (k % 3) == 2)
+            {
+                p = generateRescueSeedFromWaypoints (aStarWaypoints);
             }
             else
             {
@@ -2467,14 +3023,56 @@ public class OptiPath extends CompetitorProject
         lastRescueBurstMs = now;
     }
 
+    private double [] sampleFeasibilityStart (double [] fallback, int attempt)
+    {
+        double [] p;
+        int mode = Math.floorMod (attempt, 5);
+        if (mode == 0 && topSeeds != null && !topSeeds.isEmpty ())
+        {
+            int idx = rng.nextInt (Math.min (topSeeds.size (), 6));
+            p = topSeeds.get (idx).clone ();
+        }
+        else if (mode == 1 && detectedWaypoints != null && detectedWaypoints.length >= 2)
+        {
+            p = generateRescueSeedFromWaypoints (detectedWaypoints);
+        }
+        else if (mode == 2 && aStarWaypoints != null && aStarWaypoints.length >= 2)
+        {
+            p = generateRescueSeedFromWaypoints (aStarWaypoints);
+        }
+        else if (mode == 3)
+        {
+            p = defaultMean ();
+            for (int i = 0; i < d; i++)
+                p[i] += rng.nextGaussian () * domainDiag * 0.10;
+        }
+        else
+        {
+            p = (fallback != null) ? fallback.clone () : defaultMean ();
+            for (int i = 0; i < d; i++)
+                p[i] = lbWide[i] + rng.nextDouble () * (ubWide[i] - lbWide[i]);
+        }
+
+        repelControlPointsFromObstacles (p, 1);
+        clamp (p);
+        return p;
+    }
+
     /**
      * Genere un seed structure a partir des waypoints detectes.
      * Alterne entre clustering aux virages et spline lisse avec bruit modere.
      */
     private double [] generateWaypointRescueSeed ()
     {
+        return generateRescueSeedFromWaypoints (detectedWaypoints);
+    }
+
+    private double [] generateRescueSeedFromWaypoints (double [][] waypoints)
+    {
         double [] p = new double [d];
-        int nWp = detectedWaypoints.length;
+        if (waypoints == null || waypoints.length < 2)
+            return defaultMean ();
+        int nWp = waypoints.length;
 
         // Calculer longueurs des segments
         double totalLen = 0.0;
@@ -2483,8 +3081,8 @@ public class OptiPath extends CompetitorProject
         for (int s = 1; s < nWp; s++)
         {
             cumLen[s] = cumLen[s-1] + Math.hypot (
-                    detectedWaypoints[s][0] - detectedWaypoints[s-1][0],
-                    detectedWaypoints[s][1] - detectedWaypoints[s-1][1]);
+                    waypoints[s][0] - waypoints[s-1][0],
+                    waypoints[s][1] - waypoints[s-1][1]);
         }
         totalLen = cumLen[nWp - 1];
         if (totalLen < 1e-9) return defaultMean ();
@@ -2499,14 +3097,127 @@ public class OptiPath extends CompetitorProject
             seg = Math.max (1, Math.min (seg, nWp - 1));
             double denom = Math.max (1e-9, cumLen[seg] - cumLen[seg-1]);
             double a = (target - cumLen[seg-1]) / denom;
-            p[2 * i] = (1.0 - a) * detectedWaypoints[seg-1][0]
-                    + a * detectedWaypoints[seg][0]
+            p[2 * i] = (1.0 - a) * waypoints[seg-1][0]
+                    + a * waypoints[seg][0]
                     + rng.nextGaussian () * noiseScale;
-            p[2 * i + 1] = (1.0 - a) * detectedWaypoints[seg-1][1]
-                    + a * detectedWaypoints[seg][1]
+            p[2 * i + 1] = (1.0 - a) * waypoints[seg-1][1]
+                    + a * waypoints[seg][1]
                     + rng.nextGaussian () * noiseScale;
         }
         return p;
+    }
+
+    /**
+     * Raffinement court du meilleur incumbent connu (faisable ou non).
+     * Objectif: gagner des points en fin de run sans attendre un nouveau restart.
+     */
+    private void maybeRefineIncumbent ()
+    {
+        if (!cmaesReady) return;
+        long now = System.currentTimeMillis ();
+        long elapsed = now - startTime;
+        boolean specialized = mapDiagnostics != null && mapDiagnostics.shouldEnableSpecializedZigzag ();
+        double startRatio = specialized ? 0.28 : 0.55;
+        if (elapsed < (long) (startRatio * TOTAL_TIME_MS)) return;
+
+        long cooldown = specialized
+                ? ((elapsed > (long) (0.78 * TOTAL_TIME_MS)) ? 18L : 35L)
+                : ((elapsed > (long) (0.78 * TOTAL_TIME_MS)) ? 40L : 70L);
+        if (lastIncumbentRefineMs != 0L && now - lastIncumbentRefineMs < cooldown) return;
+
+        double [] anchor = null;
+        double anchorFit = Double.POSITIVE_INFINITY;
+
+        if (globalBestX != null && Double.isFinite (globalBestFitness))
+        {
+            anchor = globalBestX.clone ();
+            anchorFit = globalBestFitness;
+        }
+        if (cmaesSmall != null)
+        {
+            double [] x = cmaesSmall.getBestX ();
+            double f = cmaesSmall.getBestFitness ();
+            if (x != null && Double.isFinite (f) && f < anchorFit)
+            {
+                anchor = x.clone ();
+                anchorFit = f;
+            }
+        }
+        if (cmaesWide != null)
+        {
+            double [] x = cmaesWide.getBestX ();
+            double f = cmaesWide.getBestFitness ();
+            if (x != null && Double.isFinite (f) && f < anchorFit)
+            {
+                anchor = x.clone ();
+                anchorFit = f;
+            }
+        }
+        if (bestFeasibleX != null && Double.isFinite (bestFeasibleFitness) && bestFeasibleFitness < anchorFit)
+        {
+            anchor = bestFeasibleX.clone ();
+            anchorFit = bestFeasibleFitness;
+        }
+        if (anchor == null) return;
+
+        clamp (anchor);
+        double before = evaluateAndTrack (anchor);
+        double bestLocal = before;
+        double [] bestX = anchor.clone ();
+
+        int tries = specialized
+                ? ((elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 4 : 2)
+                : ((elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 2 : 1);
+        for (int t = 0; t < tries; t++)
+        {
+            double [] p = bestX.clone ();
+            double step = incumbentRefineSigma * (1.0 + 0.25 * t);
+            int edits = 1 + rng.nextInt (Math.max (2, nCP / 2));
+            for (int e = 0; e < edits; e++)
+            {
+                int cp = rng.nextInt (nCP);
+                int ix = 2 * cp;
+                p[ix] += rng.nextGaussian () * step;
+                p[ix + 1] += rng.nextGaussian () * step;
+            }
+            if (nObs > 0 && (bestFeasibleX == null || rng.nextDouble () < 0.7))
+                repelControlPointsFromObstacles (p, 1);
+            clamp (p);
+            double f = evaluateAndTrack (p);
+            if (f + 1e-9 < bestLocal)
+            {
+                bestLocal = f;
+                bestX = p;
+            }
+        }
+
+        // Mini-pattern search autour d'un CP, surtout utile en fin de budget.
+        if (elapsed > (long) (0.55 * TOTAL_TIME_MS))
+        {
+            int cp = rng.nextInt (nCP);
+            int ix = 2 * cp;
+            double s = incumbentRefineSigma * 0.7;
+            double [][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (double [] dir : dirs)
+            {
+                double [] p = bestX.clone ();
+                p[ix] += dir[0] * s;
+                p[ix + 1] += dir[1] * s;
+                clamp (p);
+                double f = evaluateAndTrack (p);
+                if (f + 1e-9 < bestLocal)
+                {
+                    bestLocal = f;
+                    bestX = p;
+                }
+            }
+        }
+
+        if (bestLocal + 1e-9 < before)
+            incumbentRefineSigma = Math.min (domainDiag * 0.06, incumbentRefineSigma * 1.06);
+        else
+            incumbentRefineSigma = Math.max (domainDiag * 0.0006, incumbentRefineSigma * 0.992);
+        lastIncumbentRefineMs = now;
     }
 
     private void maybeRefineElite ()
@@ -2601,7 +3312,7 @@ public class OptiPath extends CompetitorProject
 
     private double evaluateAndTrack (double [] p)
     {
-        double f = problem.evaluate (p);
+        double f = ConstraintAwareEvaluator.evaluateForSearch (problem, p);
         trackBest (f);
         updateFeasible (p, f);
         return f;
@@ -2610,7 +3321,12 @@ public class OptiPath extends CompetitorProject
     private void updateFeasible (double [] p, double fitness)
     {
         if (p == null || !Double.isFinite (fitness)) return;
+        // Les candidats non faisables recoivent un score proxy >= 1e6.
+        if (fitness >= 900_000.0) return;
         if (!isLikelyFeasible (p)) return;
+
+        addToFeasibleArchive (p, fitness);
+
         if (fitness < bestFeasibleFitness)
         {
             bestFeasibleFitness = fitness;
@@ -2624,62 +3340,66 @@ public class OptiPath extends CompetitorProject
         }
     }
 
+    private void addToFeasibleArchive (double [] p, double fitness)
+    {
+        double minDist = Math.max (0.20, domainDiag * 0.03);
+        int nearestIdx = -1;
+        double nearestDist = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < feasibleArchive.size (); i++)
+        {
+            double dist = distanceNorm (p, feasibleArchive.get (i));
+            if (dist < nearestDist)
+            {
+                nearestDist = dist;
+                nearestIdx = i;
+            }
+        }
+
+        if (nearestIdx >= 0 && nearestDist < minDist)
+        {
+            if (fitness < feasibleArchiveFitness.get (nearestIdx))
+            {
+                feasibleArchive.set (nearestIdx, p.clone ());
+                feasibleArchiveFitness.set (nearestIdx, fitness);
+            }
+            return;
+        }
+
+        feasibleArchive.add (p.clone ());
+        feasibleArchiveFitness.add (fitness);
+        if (feasibleArchive.size () <= FEASIBLE_ARCHIVE_MAX) return;
+
+        int worstIdx = 0;
+        double worstFit = feasibleArchiveFitness.get (0);
+        for (int i = 1; i < feasibleArchiveFitness.size (); i++)
+        {
+            if (feasibleArchiveFitness.get (i) > worstFit)
+            {
+                worstFit = feasibleArchiveFitness.get (i);
+                worstIdx = i;
+            }
+        }
+        feasibleArchive.remove (worstIdx);
+        feasibleArchiveFitness.remove (worstIdx);
+    }
+
+    private double distanceNorm (double [] a, double [] b)
+    {
+        int n = Math.min (a.length, b.length);
+        if (n <= 0) return Double.POSITIVE_INFINITY;
+        double sum = 0.0;
+        for (int i = 0; i < n; i++)
+        {
+            double d = a[i] - b[i];
+            sum += d * d;
+        }
+        return Math.sqrt (sum / n);
+    }
+
     private boolean isLikelyFeasible (double [] p)
     {
         if (p == null || p.length != d) return false;
-
-        double [] cx = new double [nCP + 2];
-        double [] cy = new double [nCP + 2];
-        cx[0] = problem.getStartPoint ().getX ();
-        cy[0] = problem.getStartPoint ().getY ();
-        for (int i = 0; i < nCP; i++)
-        {
-            cx[i + 1] = p[2 * i];
-            cy[i + 1] = p[2 * i + 1];
-        }
-        cx[nCP + 1] = problem.getEndPoint ().getX ();
-        cy[nCP + 1] = problem.getEndPoint ().getY ();
-
-        for (int s = 0; s < FEASIBILITY_SAMPLES; s++)
-        {
-            double t = (FEASIBILITY_SAMPLES == 1) ? 0.0 : (double) s / (FEASIBILITY_SAMPLES - 1);
-            double [] q = evalBezierPoint (cx, cy, t);
-            double x = q[0], y = q[1];
-            if (x < problem.getMinX () || x > problem.getMaxX ()) return false;
-            if (y < problem.getMinY () || y > problem.getMaxY ()) return false;
-            for (int j = 0; j < nObs; j++)
-            {
-                double dx = x - obsX[j];
-                double dy = y - obsY[j];
-                if (dx * dx + dy * dy <= obsR[j] * obsR[j]) return false;
-            }
-        }
-        return true;
-    }
-
-    private static double [] evalBezierPoint (double [] px, double [] py, double t)
-    {
-        int n = px.length - 1;
-        double omt = 1.0 - t;
-        double x = 0.0, y = 0.0;
-        for (int k = 0; k <= n; k++)
-        {
-            double c = binomial (n, k) * Math.pow (t, k) * Math.pow (omt, n - k);
-            x += c * px[k];
-            y += c * py[k];
-        }
-        return new double [] {x, y};
-    }
-
-    private static double binomial (int n, int k)
-    {
-        if (k < 0 || k > n) return 0.0;
-        if (k == 0 || k == n) return 1.0;
-        int kk = Math.min (k, n - k);
-        double c = 1.0;
-        for (int i = 1; i <= kk; i++)
-            c = c * (n - kk + i) / i;
-        return c;
+        return ConstraintAwareEvaluator.isStrictlyFeasible (problem, p);
     }
 
     private void trackBest (double f)

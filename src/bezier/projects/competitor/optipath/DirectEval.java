@@ -21,7 +21,7 @@ public class DirectEval implements EvalWrapper
         double [] fitness = new double [lambda];
         for (int k = 0; k < lambda; k++)
         {
-            fitness [k] = problem.evaluate (candidates [k]);
+            fitness [k] = ConstraintAwareEvaluator.evaluateForSearch (problem, candidates [k]);
             evalCount++;
         }
         return fitness;

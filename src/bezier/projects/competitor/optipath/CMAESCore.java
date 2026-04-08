@@ -146,9 +146,7 @@ public class CMAESCore implements Optimizer
         for (double [] seed : seeds)
         {
             bounds.clampInPlace (seed);
-            double f = problem.evaluate (seed);
-            totalEvaluations++;
-            updateBest (seed, f);
+            double f = evaluateCandidate (seed);
             evaluated.add (seed);
             fitnesses.add (f);
             if (f < bestSeedF)
@@ -174,9 +172,7 @@ public class CMAESCore implements Optimizer
         for (int s = 0; s < nLocalSeeds; s++)
         {
             double [] result = quickLocalOptimize (cachedSeeds.get (s).clone (), 1000);
-            double fResult = problem.evaluate (result);
-            totalEvaluations++;
-            updateBest (result, fResult);
+            double fResult = evaluateCandidate (result);
             if (fResult < localBestF)
             {
                 localBestF = fResult;
@@ -325,9 +321,7 @@ public class CMAESCore implements Optimizer
     {
         double [] x = x0.clone ();
         bounds.clampInPlace (x);
-        double fx = problem.evaluate (x);
-        totalEvaluations++;
-        updateBest (x, fx);
+        double fx = evaluateCandidate (x);
 
         double step = sigma0 / 2.0;
         int successes = 0;
@@ -340,9 +334,7 @@ public class CMAESCore implements Optimizer
                 xNew [i] = x [i] + rng.nextGaussian () * step;
             bounds.clampInPlace (xNew);
 
-            double fNew = problem.evaluate (xNew);
-            totalEvaluations++;
-            updateBest (xNew, fNew);
+            double fNew = evaluateCandidate (xNew);
 
             if (fNew < fx)
             {
@@ -742,16 +734,12 @@ public class CMAESCore implements Optimizer
         {
             double [] bSeed = problem.getRandomControlPoints1DArray ();
             bounds.clampInPlace (bSeed);
-            double bF = problem.evaluate (bSeed);
-            totalEvaluations++;
-            updateBest (bSeed, bF);
+            double bF = evaluateCandidate (bSeed);
             for (int r = 0; r < 3; r++)
             {
                 double [] s = problem.getRandomControlPoints1DArray ();
                 bounds.clampInPlace (s);
-                double f = problem.evaluate (s);
-                totalEvaluations++;
-                updateBest (s, f);
+                double f = evaluateCandidate (s);
                 if (f < bF) { bF = f; bSeed = s; }
             }
             int nCP = d / 2;
@@ -764,9 +752,7 @@ public class CMAESCore implements Optimizer
                     s [2 * i + 1] = bounds.getLb () [1] + rng.nextDouble () * bounds.getRange (1);
                 }
                 bounds.clampInPlace (s);
-                double f = problem.evaluate (s);
-                totalEvaluations++;
-                updateBest (s, f);
+                double f = evaluateCandidate (s);
                 if (f < bF) { bF = f; bSeed = s; }
             }
             return bSeed;
@@ -942,6 +928,16 @@ public class CMAESCore implements Optimizer
     }
 
     // ===== Utilitaires =====
+
+    private double evaluateCandidate (double [] x)
+    {
+        double [] [] one = new double [] [] { x };
+        double [] f = evalWrapper.evaluateBatch (one, 1);
+        totalEvaluations++;
+        double fx = f [0];
+        updateBest (x, fx);
+        return fx;
+    }
 
     /** Multiplie M × v et stocke le résultat dans out (pas d'allocation). */
     private void matVecMulInPlace (double [][] M, double [] v, double [] out)

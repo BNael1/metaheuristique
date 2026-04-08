@@ -1,4 +1,4 @@
-package bezier2_0.projects.competitor.optipath;
+package bezier.projects.competitor.optipath;
 
 import java.util.ArrayList;
 
@@ -76,7 +76,8 @@ public final class MapDiagnostics
 
     public boolean hasStrongStructure ()
     {
-        return this.wallAlignmentConfidence >= 0.45 && this.pathStretch >= 1.2;
+        return (this.wallAlignmentConfidence >= 0.45 && this.pathStretch >= 1.2)
+                || (this.pathStretch >= 1.8 && this.straightBlockageRatio >= 0.25);
     }
 
     private static double straightBlockageRatio (double sx, double sy, double ex, double ey,

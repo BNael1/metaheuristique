@@ -66,8 +66,6 @@ public final class RestartMiniBenchmark
                 runs = Integer.parseInt (args [++i]);
         }
 
-        Problem.headless = true;
-
         VariantResult baseline = runVariant ("Baseline_Legacy", () -> new LegacyThresholdRestart (), seconds, runs);
         VariantResult v1 = runVariant ("V1_DynFrust", HybridMultiSignalRestart::v1, seconds, runs);
         VariantResult v2 = runVariant ("V2_AddGeo", HybridMultiSignalRestart::v2, seconds, runs);

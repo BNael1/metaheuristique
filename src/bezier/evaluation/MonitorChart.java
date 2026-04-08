@@ -99,7 +99,7 @@ public class MonitorChart
             legend.setPosition (org.jfree.chart.ui.RectangleEdge.BOTTOM);
             chart.addSubtitle (legend);
             this.chartPanel = new ChartPanel (chart);
-            this.chartPanel.setPreferredSize (new Dimension (MainFrame.getInstance().getWidth (), MainFrame.getInstance().getWidth () / 2));
+            this.chartPanel.setPreferredSize (new Dimension (MainFrame.getInstance().getWidth (), MainFrame.getInstance().getWidth () / 3));
             this.updateTimer = new Timer (MonitorChart.UPDATE_FREQ, e ->
             {
                 if (this.updatePending)

@@ -37,17 +37,17 @@ public class Obstacle
 		return penalty;
 	}
 
-	public double getX ()
+	double getX ()
 	{
 		return this.center.getX ();
 	}
 
-	public double getY ()
+	double getY ()
 	{
 		return this.center.getY ();
 	}
 
-	public double getRadius ()
+	double getRadius ()
 	{
 		return this.radius;
 	}

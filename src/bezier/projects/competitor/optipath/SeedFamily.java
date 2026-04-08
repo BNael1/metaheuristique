@@ -1,4 +1,4 @@
-package bezier2_0.projects.competitor.optipath;
+package bezier.projects.competitor.optipath;
 
 /**
  * Familles de seeds utilises pour construire un portfolio diversifie.
