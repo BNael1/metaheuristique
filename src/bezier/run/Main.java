@@ -2,6 +2,7 @@ package bezier.run;
 
 import java.awt.Font;
 import java.awt.Toolkit;
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -17,6 +18,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+
+import javax.swing.SwingUtilities;
 
 import org.reflections.Reflections;
 
@@ -41,6 +44,12 @@ public final class Main extends OutputWriter
 	private static Main instance = null;
 
 	private static final String LOG_FILE = "bezier.log";
+	private static final String IMAGE_OUTPUT_DIR = "results/images";
+	private static final String TRAJECTORY_IMAGE_DIR = IMAGE_OUTPUT_DIR + File.separator + "trajectory";
+	private static final String MONITOR_IMAGE_DIR = IMAGE_OUTPUT_DIR + File.separator + "monitor";
+	private static final int TRAJECTORY_IMAGE_SIZE = 1024;
+	private static final int MONITOR_IMAGE_WIDTH = 1280;
+	private static final int MONITOR_IMAGE_HEIGHT = 480;
 	private static final int AWAIT = 1;
 //	private static final int NB_RUNS = 10;
 	private static final int NB_RUNS = 1;
@@ -144,7 +153,9 @@ public final class Main extends OutputWriter
 							fields [j].set (null, null);
 					}
 				}
-				solutions.add (Main.run (subClass, problem));
+				Solution runSolution = Main.run (subClass, problem);
+				solutions.add (runSolution);
+				saveCharts (subClass, problem, i + 1);
 			}
 			catch (Exception e)
 			{
@@ -152,6 +163,42 @@ public final class Main extends OutputWriter
 			}
 		System.setOut (out);
 		return new Solution (solutions);
+	}
+
+	private static String sanitizeName (String value)
+	{
+		return value.replaceAll ("[^A-Za-z0-9._-]", "_");
+	}
+
+	private static void saveCharts (Class <?> subClass, Problem problem, int runIndex)
+	{
+		try
+		{
+			if (Main.DISPLAY_CHART)
+				SwingUtilities.invokeAndWait (() -> {});
+
+			String className = sanitizeName (subClass.getSimpleName ());
+			String problemName = sanitizeName (problem.getName ());
+			String trajectoryBase = Main.TRAJECTORY_IMAGE_DIR + File.separator
+					+ className + "_" + problemName + "_run" + runIndex + ".png";
+			String monitorBase = Main.MONITOR_IMAGE_DIR + File.separator
+					+ className + "_" + problemName + "_run" + runIndex + ".png";
+
+			BezierChart.getInstance ().saveImage (
+					trajectoryBase,
+					Main.TRAJECTORY_IMAGE_SIZE,
+					Main.TRAJECTORY_IMAGE_SIZE
+			);
+			MonitorChart.getInstance ().saveImage (
+					monitorBase,
+					Main.MONITOR_IMAGE_WIDTH,
+					Main.MONITOR_IMAGE_HEIGHT
+			);
+		}
+		catch (Exception e)
+		{
+			System.err.println ("Impossible d'enregistrer les images: " + e.getMessage ());
+		}
 	}
 	
 	private void launch ()

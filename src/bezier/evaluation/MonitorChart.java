@@ -2,7 +2,10 @@ package bezier.evaluation;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
+import java.io.File;
+import java.io.IOException;
 
+import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -28,6 +31,7 @@ public class MonitorChart
     private static MonitorChart instance = null;
     private TimeSeries bestEvaluation;
     private TimeSeries currentEvaluation;
+    private JFreeChart chart;
     private ChartPanel chartPanel;
     private Timer updateTimer;
     private volatile boolean updatePending = false;
@@ -70,35 +74,36 @@ public class MonitorChart
             }
         }
         if (newMin != Double.POSITIVE_INFINITY && newMax != Double.NEGATIVE_INFINITY && newMin != newMax)
-            this.chartPanel.getChart ().getXYPlot ().getRangeAxis ().setRange (newMin, newMax);
+            this.chart.getXYPlot ().getRangeAxis ().setRange (newMin, newMax);
     }
 
     private MonitorChart (String title)
     {
+        this.bestEvaluation = new TimeSeries ("Meilleure évaluation");
+        this.currentEvaluation = new TimeSeries ("Évaluation courante");
+
+        TimeSeriesCollection tsc = new TimeSeriesCollection ();
+        tsc.addSeries (this.currentEvaluation);
+        tsc.addSeries (this.bestEvaluation);
+
+        this.chart = ChartFactory.createTimeSeriesChart (
+                title,
+                "Temps",
+                "Évaluation",
+                tsc,
+                false,
+                false,
+                false
+        );
+        MainFrame.scaleChartFonts (this.chart);
+        this.chart.removeLegend ();
+        LegendTitle legend = new LegendTitle (this.chart.getPlot ());
+        legend.setPosition (org.jfree.chart.ui.RectangleEdge.BOTTOM);
+        this.chart.addSubtitle (legend);
+
         if (Main.DISPLAY_CHART)
         {
-            this.bestEvaluation = new TimeSeries ("Meilleure évaluation");
-            this.currentEvaluation = new TimeSeries ("Évaluation courante");
-
-            TimeSeriesCollection tsc = new TimeSeriesCollection ();
-            tsc.addSeries (this.currentEvaluation);
-            tsc.addSeries (this.bestEvaluation);
-
-            JFreeChart chart = ChartFactory.createTimeSeriesChart (
-                    title,
-                    "Temps",
-                    "Évaluation",
-                    tsc,
-                    false,
-                    false,
-                    false
-            );
-            MainFrame.scaleChartFonts (chart);
-            chart.removeLegend ();
-            LegendTitle legend = new LegendTitle (chart.getPlot ());
-            legend.setPosition (org.jfree.chart.ui.RectangleEdge.BOTTOM);
-            chart.addSubtitle (legend);
-            this.chartPanel = new ChartPanel (chart);
+            this.chartPanel = new ChartPanel (this.chart);
             this.chartPanel.setPreferredSize (new Dimension (MainFrame.getInstance().getWidth (), MainFrame.getInstance().getWidth () / 3));
             this.updateTimer = new Timer (MonitorChart.UPDATE_FREQ, e ->
             {
@@ -114,6 +119,15 @@ public class MonitorChart
             mainFrame.add (this.chartPanel, BorderLayout.NORTH);
             mainFrame.pack ();
         }
+    }
+
+    public void saveImage (String outputPath, int width, int height) throws IOException
+    {
+        File file = new File (outputPath);
+        File parent = file.getParentFile ();
+        if (parent != null && !parent.exists ())
+            parent.mkdirs ();
+        ImageIO.write (this.chart.createBufferedImage (width, height), "png", file);
     }
 
     /**

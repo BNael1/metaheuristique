@@ -5,7 +5,10 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Rectangle2D;
+import java.io.File;
+import java.io.IOException;
 
+import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -40,6 +43,14 @@ public final class BezierChart
     private XYPlot plot;
     private Timer updateTimer;
     private Coordinates [] bestBezier;
+
+    private void refreshTrajectorySeries ()
+    {
+        this.trajectorySeries.clear ();
+        if (this.bestBezier != null)
+            for (Coordinates p : this.bestBezier)
+                this.trajectorySeries.add (p.getX (), p.getY ());
+    }
     
     private BezierChart (Problem problem)
     {
@@ -124,15 +135,26 @@ public final class BezierChart
 	 */
     public void changeBezier (final Coordinates [] bezier)
     {
+        this.bestBezier = bezier;
         if (!Main.DISPLAY_CHART) return;
         SwingUtilities.invokeLater (new Runnable ()
         {
             @Override
             public void run ()
             {
-            	bestBezier = bezier;
+	            	bestBezier = bezier;
             }
         });
+    }
+
+    public void saveImage (String outputPath, int width, int height) throws IOException
+    {
+        this.refreshTrajectorySeries ();
+        File file = new File (outputPath);
+        File parent = file.getParentFile ();
+        if (parent != null && !parent.exists ())
+            parent.mkdirs ();
+        ImageIO.write (this.chart.createBufferedImage (width, height), "png", file);
     }
 
     private void addObstaclesAnnotations1 ()
