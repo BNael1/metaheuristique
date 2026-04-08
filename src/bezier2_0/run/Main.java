@@ -5,7 +5,6 @@ import java.awt.Toolkit;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
@@ -67,23 +66,10 @@ public final class Main extends OutputWriter
 	private Main ()
 	{
 	}
-
-	private static Project instantiateProject (Class<?> subClass, Problem problem)
-			throws InstantiationException, IllegalAccessException, InvocationTargetException
-	{
-		for (Constructor<?> constructor : subClass.getConstructors ())
-		{
-			Class<?>[] params = constructor.getParameterTypes ();
-			if (params.length == 1 && params[0].isAssignableFrom (problem.getClass ()))
-				return (Project) constructor.newInstance (problem);
-		}
-		throw new IllegalArgumentException (
-				"Aucun constructeur public compatible (Problem) pour " + subClass.getName ());
-	}
 	
 	private static Solution run (Class <?> subClass, Problem problem) throws InterruptedException, ExecutionException, InstantiationException, IllegalAccessException, IllegalArgumentException, InvocationTargetException, SecurityException
 	{
-		Project project = Main.instantiateProject (subClass, problem);
+		Project project = (Project) subClass.getConstructors () [0].newInstance (problem);
 		ExecutorService executor = Executors.newSingleThreadExecutor();
 		Future <?> future = executor.submit (project);
 		Solution solution = null;
@@ -95,7 +81,6 @@ public final class Main extends OutputWriter
 				System.setOut (stream);
 			}
 			future.get (Main.NB_SECONDS, TimeUnit.SECONDS);
-			solution = project.getSolution ();
 		}
 		catch (TimeoutException e)
 		{
@@ -108,10 +93,6 @@ public final class Main extends OutputWriter
 				System.out.println("\nNe peut pas tuer le thread.\nAnnulation de l'exécution.");
 				System.exit (0);
 			}
-		}
-		finally
-		{
-			executor.shutdownNow ();
 		}
 		return solution;
 	}
@@ -170,12 +151,6 @@ public final class Main extends OutputWriter
 				e.printStackTrace();
 			}
 		System.setOut (out);
-		if (solutions.isEmpty ())
-		{
-			ArrayList<String> authors = new ArrayList<String> ();
-			authors.add ("Exécution échouée");
-			return new Solution (authors, subClass.getSimpleName (), problem.getName (), Double.POSITIVE_INFINITY);
-		}
 		return new Solution (solutions);
 	}
 	
