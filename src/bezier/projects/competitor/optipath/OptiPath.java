@@ -97,6 +97,8 @@ public class OptiPath extends CompetitorProject
     private double pathComplexity;
     /** Seed A* garde comme fallback garanti pour les restarts. */
     private double [] aStarSeed;
+    /** Fitness du seed A*. */
+    private double aStarSeedFitness;
     /** Waypoints extraits du path A* pour rescue structurel. */
     private double [][] aStarWaypoints;
     /** Diagnostic structurel de carte (calcule une fois au demarrage). */
@@ -238,6 +240,7 @@ public class OptiPath extends CompetitorProject
         detectedWaypoints = null;
         pathComplexity = 1.0;
         aStarSeed = null;
+        aStarSeedFitness = Double.POSITIVE_INFINITY;
         aStarWaypoints = null;
         mapDiagnostics = null;
         currentSeedFamily = SeedFamily.GENERIC;
@@ -299,6 +302,7 @@ public class OptiPath extends CompetitorProject
         }
 
         massiveSeed ();
+
         bootstrapFeasibleSearchIfNeeded ();
 
         localOptIdx = 0;
@@ -922,7 +926,21 @@ public class OptiPath extends CompetitorProject
         lastRestartTime = System.currentTimeMillis ();
         fitnessAtLaunch = globalBestFitness;
 
-        double [] initMean = pickRestartMean ();
+        // Au premier lancement, CMA-ES small exploite le meilleur seed connu
+        // tandis que CMA-ES wide explore avec diversite.
+        double [] initMeanSmall;
+        double [] initMeanWide;
+        if (restartCount == 0 && globalBestX != null)
+        {
+            initMeanSmall = globalBestX.clone ();
+            initMeanWide = pickRestartMean ();
+        }
+        else
+        {
+            double [] m = pickRestartMean ();
+            initMeanSmall = m;
+            initMeanWide = m;
+        }
 
         AlgorithmParameters ps = new AlgorithmParameters ();
         ps.setMargin (marginSmall);
@@ -933,11 +951,11 @@ public class OptiPath extends CompetitorProject
         CovarianceUpdate covWide = buildCovarianceUpdate ();
 
         cmaesSmall = CMAESBuilder.bipop (problem)
-                .bounds (lbSmall, ubSmall).parameters (ps).initMean (initMean)
+                .bounds (lbSmall, ubSmall).parameters (ps).initMean (initMeanSmall)
             .covariance (covSmall)
                 .sampling (new MirrorSampling ()).build ();
         cmaesWide = CMAESBuilder.bipop (problem)
-                .bounds (lbWide, ubWide).parameters (pw).initMean (initMean)
+                .bounds (lbWide, ubWide).parameters (pw).initMean (initMeanWide)
             .covariance (covWide)
                 .sampling (new MirrorSampling ()).build ();
 
@@ -3121,7 +3139,49 @@ public class OptiPath extends CompetitorProject
         p = repairSeedForFeasibility (p, repairIters, 1.0);
         repelControlPointsFromObstacles (p, 3);
         this.aStarSeed = p.clone ();
-        addSeed (seeds, fits, p);
+        clamp (p);
+        this.aStarSeedFitness = evaluateAndTrack (p);
+        seeds.add (p.clone ());
+        fits.add (aStarSeedFitness);
+        if (activeSeedFamilies != null)
+            activeSeedFamilies.add (currentSeedFamily != null ? currentSeedFamily : SeedFamily.GENERIC);
+
+        // Raffinement local intensif du A* seed pour les grilles traversables.
+        // On polit le chemin diagonal avec une recherche locale par perturbation
+        // de points de controle individuels, ce que le CMA-ES ne fera pas efficacement.
+        double aStarGap = estimateMinGap ();
+        if (aStarGap > 2.0 && nObs > 20 && aStarSeedFitness < domainDiag * 2.0)
+        {
+            double [] refined = p.clone ();
+            double bestF = aStarSeedFitness;
+            double stepSize = aStarGap * 0.3;
+            for (int iter = 0; iter < 500; iter++)
+            {
+                double [] trial = refined.clone ();
+                int edits = 1 + rng.nextInt (Math.max (1, nCP / 3));
+                for (int e = 0; e < edits; e++)
+                {
+                    int cp = rng.nextInt (nCP);
+                    trial[2 * cp] += rng.nextGaussian () * stepSize;
+                    trial[2 * cp + 1] += rng.nextGaussian () * stepSize;
+                }
+                repelControlPointsFromObstacles (trial, 1);
+                clamp (trial);
+                double f = evaluateAndTrack (trial);
+                if (f + 1e-9 < bestF)
+                {
+                    refined = trial;
+                    bestF = f;
+                }
+                if (iter % 80 == 79) stepSize *= 0.85;
+            }
+            if (bestF + 1e-9 < aStarSeedFitness)
+            {
+                this.aStarSeed = refined.clone ();
+                this.aStarSeedFitness = bestF;
+                addSeed (seeds, fits, refined);
+            }
+        }
 
         // Variantes legeres autour de la trajectoire A*.
         for (int v = 0; v < 12; v++)
@@ -3491,8 +3551,8 @@ public class OptiPath extends CompetitorProject
             {
                 double dist = Math.hypot (obsX[i] - obsX[j], obsY[i] - obsY[j]);
                 double sumR = obsR[i] + obsR[j];
-                // Ne considerer que les obstacles "proches" (potentiellement un mur)
-                if (dist < 2.0 * sumR)
+                // Capturer les voisins de grille reguliere (spacing > 2*r)
+                if (dist < 5.0 * sumR)
                 {
                     double gap = dist - sumR;
                     if (gap > 0 && gap < minGap) minGap = gap;
@@ -3743,9 +3803,16 @@ public class OptiPath extends CompetitorProject
         double bestLocal = before;
         double [] bestX = anchor.clone ();
 
-        int tries = specialized
-                ? ((elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 4 : 2)
-                : ((elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 2 : 1);
+        // Plus de tries pour complexite moderee (grilles, murs) car le
+        // raffinement local est tres efficace pour polir des chemins quasi-optimaux.
+        boolean moderateComplexity = nObs >= 20 && nObs <= 150 && d < 40;
+        int tries;
+        if (specialized)
+            tries = (elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 4 : 2;
+        else if (moderateComplexity)
+            tries = (elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 4 : 2;
+        else
+            tries = (elapsed > (long) (0.80 * TOTAL_TIME_MS)) ? 2 : 1;
         for (int t = 0; t < tries; t++)
         {
             double [] p = bestX.clone ();

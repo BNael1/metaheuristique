@@ -74,7 +74,7 @@ public class CMAESCore implements Optimizer
 
     // ===== IPOP / restart =====
     private final int lambda0;
-    private final double sigma0;
+    private double sigma0;
     private int restartCount;
     private int stagnationCounter;
     private int maxStagnation;
@@ -997,6 +997,7 @@ public class CMAESCore implements Optimizer
     public BoundsChecker getBounds ()  { return bounds; }
     public Random getRng ()            { return rng; }
     public double getSigma0 ()         { return sigma0; }
+    public void overrideSigma0 (double s) { this.sigma0 = s; }
     public int getLambda0 ()           { return lambda0; }
     public ArrayList<double []> getCachedSeeds () { return cachedSeeds; }
 }

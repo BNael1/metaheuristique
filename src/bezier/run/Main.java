@@ -51,8 +51,8 @@ public final class Main extends OutputWriter
 	private static final int MONITOR_IMAGE_WIDTH = 1280;
 	private static final int MONITOR_IMAGE_HEIGHT = 480;
 	private static final int AWAIT = 1;
-//	private static final int NB_RUNS = 10;
-	private static final int NB_RUNS = 1;
+	private static final int NB_RUNS = 10;
+//	private static final int NB_RUNS = 1;
 	private static final int NB_SECONDS = 60;
 //	private static final int NB_SECONDS = 10;
 	public static final boolean DISPLAY_CHART = true;
@@ -61,6 +61,21 @@ public final class Main extends OutputWriter
 //	static final boolean DISPLAY_STD_OUT = false;
 	static final boolean COMPETITION = true;
 	//static final boolean COMPETITION = false;
+
+	// Sélection simple des problèmes à exécuter directement dans le code.
+	// - true  : lance tous les problèmes.
+	// - false : lance uniquement les noms listés dans SELECTED_PROBLEMS.
+	private static final boolean RUN_ALL_PROBLEMS = false;
+	private static final String [] SELECTED_PROBLEMS = {
+		"prob1",
+		"prob2",
+		"prob3",
+		"prob4",
+		"prob5",
+		"prob6",
+		"prob7",
+		"prob8"
+	};
 	
 	/**
 	 * @return Retourne l'instance de Main
@@ -201,7 +216,41 @@ public final class Main extends OutputWriter
 		}
 	}
 	
-	private void launch ()
+	private static Problem findProblemByName (String token, ArrayList <Problem> allProblems)
+	{
+		String value = token.trim ();
+		if (value.isEmpty ())
+			return null;
+
+		String normalized = value.endsWith (".bzr") ? value.substring (0, value.length () - 4) : value;
+		for (Problem problem : allProblems)
+			if (problem.getName ().equalsIgnoreCase (normalized))
+				return problem;
+
+		return null;
+	}
+
+	private static ArrayList <Problem> selectProblemsFromConfig (ArrayList <Problem> allProblems)
+	{
+		if (Main.RUN_ALL_PROBLEMS)
+			return new ArrayList<Problem> (allProblems);
+
+		ArrayList <Problem> selected = new ArrayList<Problem> ();
+		for (String token : Main.SELECTED_PROBLEMS)
+		{
+			Problem matched = Main.findProblemByName (token, allProblems);
+			if (matched == null)
+			{
+				System.err.println ("Problème introuvable: " + token.trim ());
+				continue;
+			}
+			selected.add (matched);
+		}
+
+		return selected;
+	}
+
+	private void launch (ArrayList <Problem> problems)
 	{
 		this.println ("Évaluation des projets");
 		this.print (Main.NB_RUNS + " exécution");
@@ -214,8 +263,6 @@ public final class Main extends OutputWriter
 			this.println ("s");
 		else
 			this.println ("");
-		Problem.getProblems ();
-		ArrayList <Problem> problems = Problem.getProblems ();
 		int maxLength = 0;
 		for (Problem problem: problems)
 			if (problem.getName().length() > maxLength)
@@ -283,10 +330,18 @@ public final class Main extends OutputWriter
 	 */
 	public static void main (String [] args)
 	{
+		ArrayList <Problem> allProblems = Problem.getProblems ();
+		ArrayList <Problem> selectedProblems = Main.selectProblemsFromConfig (allProblems);
+		if (selectedProblems.isEmpty ())
+		{
+			System.err.println ("Aucun problème sélectionné. Modifiez RUN_ALL_PROBLEMS / SELECTED_PROBLEMS dans Main.java");
+			return;
+		}
+
 		Main main = Main.getInstance ();
 		MainFrame.getInstance();
 		main.addOutput (StandardOutput.getInstance ());
 		main.addOutput (new LogFileOutput (Main.LOG_FILE));
-		main.launch ();
+		main.launch (selectedProblems);
 	}
 }
