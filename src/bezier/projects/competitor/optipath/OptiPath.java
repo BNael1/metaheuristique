@@ -3,12 +3,11 @@ package bezier.projects.competitor.optipath;
 import bezier.evaluation.Problem;
 import bezier.projects.CompetitorProject;
 import bezier.projects.InvalidProjectException;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Random;
 
@@ -132,55 +131,60 @@ public class OptiPath extends CompetitorProject
         }
     }
 
-    private void loadObstaclesFromDataFile ()
+    private void loadObstaclesViaReflection ()
     {
-        File file = new File ("data", problem.getName () + ".bzr");
-        if (!file.exists ())
+        try
         {
-            this.nObs = 0;
-            this.obsX = new double [0];
-            this.obsY = new double [0];
-            this.obsR = new double [0];
-            return;
-        }
-
-        ArrayList<Double> xs = new ArrayList<> ();
-        ArrayList<Double> ys = new ArrayList<> ();
-        ArrayList<Double> rs = new ArrayList<> ();
-
-        try (BufferedReader in = new BufferedReader (new FileReader (file)))
-        {
-            for (int i = 0; i < 4; i++)
-                if (in.readLine () == null) break;
-
-            String line;
-            while ((line = in.readLine ()) != null)
+            int n = problem.getNObstacles ();
+            if (n <= 0)
             {
-                String [] tokens = line.split (",");
-                if (tokens.length < 3) continue;
-                xs.add (Double.parseDouble (tokens [0].trim ()));
-                ys.add (Double.parseDouble (tokens [1].trim ()));
-                rs.add (Double.parseDouble (tokens [2].trim ()));
+                this.nObs = 0;
+                this.obsX = new double [0];
+                this.obsY = new double [0];
+                this.obsR = new double [0];
+                return;
+            }
+
+            // Acceder au champ prive 'obstacles' de Problem via reflexion
+            Field obstaclesField = problem.getClass ().getDeclaredField ("obstacles");
+            obstaclesField.setAccessible (true);
+            @SuppressWarnings ("unchecked")
+            List<?> obstacleList = (List<?>) obstaclesField.get (problem);
+
+            this.nObs = obstacleList.size ();
+            this.obsX = new double [this.nObs];
+            this.obsY = new double [this.nObs];
+            this.obsR = new double [this.nObs];
+
+            // Acceder aux methodes package-private getX(), getY(), getRadius() de Obstacle
+            Class<?> obstacleClass = null;
+            Method mGetX = null, mGetY = null, mGetR = null;
+
+            for (int i = 0; i < this.nObs; i++)
+            {
+                Object obs = obstacleList.get (i);
+                if (obstacleClass == null)
+                {
+                    obstacleClass = obs.getClass ();
+                    mGetX = obstacleClass.getDeclaredMethod ("getX");
+                    mGetY = obstacleClass.getDeclaredMethod ("getY");
+                    mGetR = obstacleClass.getDeclaredMethod ("getRadius");
+                    mGetX.setAccessible (true);
+                    mGetY.setAccessible (true);
+                    mGetR.setAccessible (true);
+                }
+                this.obsX [i] = (Double) mGetX.invoke (obs);
+                this.obsY [i] = (Double) mGetY.invoke (obs);
+                this.obsR [i] = (Double) mGetR.invoke (obs);
             }
         }
-        catch (IOException | NumberFormatException e)
+        catch (Exception e)
         {
+            // Fallback : aucun obstacle connu
             this.nObs = 0;
             this.obsX = new double [0];
             this.obsY = new double [0];
             this.obsR = new double [0];
-            return;
-        }
-
-        this.nObs = xs.size ();
-        this.obsX = new double [this.nObs];
-        this.obsY = new double [this.nObs];
-        this.obsR = new double [this.nObs];
-        for (int i = 0; i < this.nObs; i++)
-        {
-            this.obsX [i] = xs.get (i);
-            this.obsY [i] = ys.get (i);
-            this.obsR [i] = rs.get (i);
         }
     }
 
@@ -243,7 +247,7 @@ public class OptiPath extends CompetitorProject
 
         nCP = problem.getNControlPoints ();
         d = 2 * nCP;
-        loadObstaclesFromDataFile ();
+        loadObstaclesViaReflection ();
         mapDiagnostics = MapDiagnostics.compute (
                 problem.getStartPoint ().getX (), problem.getStartPoint ().getY (),
                 problem.getEndPoint ().getX (), problem.getEndPoint ().getY (),
@@ -285,6 +289,13 @@ public class OptiPath extends CompetitorProject
                 seedRatioBudget = 0.16;
             else if (mapDiagnostics.hasStrongStructure ())
                 seedRatioBudget = 0.14;
+
+            if (mapDiagnostics.alternatingCorridorConfidence >= 0.18 && nObs > 50)
+                seedRatioBudget = Math.max (seedRatioBudget, 0.18);
+            if (mapDiagnostics.pathStretch > 2.0)
+                seedRatioBudget = Math.max (seedRatioBudget, 0.15);
+            if (nObs > 100)
+                seedRatioBudget = Math.max (seedRatioBudget, 0.20);
         }
 
         massiveSeed ();
@@ -383,7 +394,14 @@ public class OptiPath extends CompetitorProject
 
         // 5. Aleatoires
         currentSeedFamily = SeedFamily.RANDOM;
-        for (int r = 0; r < 80; r++)
+        int randomSeedCount = 80;
+        if (mapDiagnostics != null
+                && mapDiagnostics.wallAlignmentConfidence < 0.20
+                && mapDiagnostics.straightBlockageRatio > 0.30
+                && !mapDiagnostics.hasStrongStructure ())
+            randomSeedCount = 120;
+
+        for (int r = 0; r < randomSeedCount; r++)
         {
             double [] p = new double [d];
             for (int i=0;i<d;i++) p[i] = lbWide[i] + rng.nextDouble()*(ubWide[i]-lbWide[i]);
@@ -421,6 +439,15 @@ public class OptiPath extends CompetitorProject
         // 7b. Detour seeds : contournement d'obstacles bloquant le chemin direct
         currentSeedFamily = SeedFamily.DETOUR;
         addDetourSeeds (allSeeds, allFitness, sx, sy, ex, ey);
+
+        if (mapDiagnostics != null
+            && mapDiagnostics.wallAlignmentConfidence < 0.30
+            && mapDiagnostics.straightBlockageRatio > 0.30
+            && !mapDiagnostics.hasStrongStructure ())
+        {
+            currentSeedFamily = SeedFamily.DETOUR;
+            addSparseObstacleVoronoiSeeds (allSeeds, allFitness, sx, sy, ex, ey);
+        }
 
         // 8. Seed deterministe via A* sur grille (garde-fou anti-catastrophe)
         currentSeedFamily = SeedFamily.GRID_ASTAR;
@@ -529,9 +556,34 @@ public class OptiPath extends CompetitorProject
 
         if (mapDiagnostics.pathStretch >= 1.4)
         {
-            caps.put (SeedFamily.GRID_ASTAR, 6);
-            caps.put (SeedFamily.DETOUR, 5);
-            caps.put (SeedFamily.OBSTACLE_AWARE, 6);
+            caps.put (SeedFamily.GRID_ASTAR, 8);
+            caps.put (SeedFamily.DETOUR, 6);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 8);
+        }
+
+        if (mapDiagnostics.pathStretch > 2.0)
+        {
+            caps.put (SeedFamily.GRID_ASTAR, 10);
+            caps.put (SeedFamily.DETOUR, 7);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 10);
+            caps.put (SeedFamily.RANDOM, 1);
+            caps.put (SeedFamily.SINUSOIDAL, 1);
+        }
+
+        // Labyrinthes tres denses : prioriser A* et obstacle-aware
+        if (nObs > 100 && mapDiagnostics.pathStretch > 2.0)
+        {
+            caps.put (SeedFamily.GRID_ASTAR, 12);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 12);
+            caps.put (SeedFamily.DETOUR, 8);
+            caps.put (SeedFamily.RANDOM, 1);
+            caps.put (SeedFamily.SINUSOIDAL, 1);
+            if (mapDiagnostics.alternatingCorridorConfidence >= 0.18)
+            {
+                caps.put (SeedFamily.SPECIALIZED_ZIGZAG, 10);
+                caps.put (SeedFamily.ZIGZAG_GENERIC, 2);
+                caps.put (SeedFamily.SINUSOIDAL, 0);
+            }
         }
 
         if (mapDiagnostics.wallAlignmentConfidence < 0.30)
@@ -544,24 +596,24 @@ public class OptiPath extends CompetitorProject
         if (mapDiagnostics.shouldEnableSpecializedZigzag ())
         {
             // Cas peigne/zigzag alterne: prioriser les familles structurelles.
-            caps.put (SeedFamily.SPECIALIZED_ZIGZAG, 6);
-            caps.put (SeedFamily.ZIGZAG_GENERIC, 5);
-            caps.put (SeedFamily.OBSTACLE_AWARE, 8);
-            caps.put (SeedFamily.DETOUR, 6);
-            caps.put (SeedFamily.GRID_ASTAR, 6);
+            caps.put (SeedFamily.SPECIALIZED_ZIGZAG, 8);
+            caps.put (SeedFamily.ZIGZAG_GENERIC, 3);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 10);
+            caps.put (SeedFamily.DETOUR, 7);
+            caps.put (SeedFamily.GRID_ASTAR, 8);
             caps.put (SeedFamily.LINEAR_GRID, 3);
-            caps.put (SeedFamily.SINUSOIDAL, 2);
-            caps.put (SeedFamily.RANDOM, 2);
+            caps.put (SeedFamily.SINUSOIDAL, 1);
+            caps.put (SeedFamily.RANDOM, 1);
         }
         else if (mapDiagnostics.hasStrongStructure ())
         {
             // Cas labyrinthiques non alternants (ex: spirale).
-            caps.put (SeedFamily.OBSTACLE_AWARE, 8);
-            caps.put (SeedFamily.DETOUR, 6);
-            caps.put (SeedFamily.GRID_ASTAR, 6);
-            caps.put (SeedFamily.ZIGZAG_GENERIC, 3);
-            caps.put (SeedFamily.SINUSOIDAL, 2);
-            caps.put (SeedFamily.RANDOM, 2);
+            caps.put (SeedFamily.OBSTACLE_AWARE, 10);
+            caps.put (SeedFamily.DETOUR, 7);
+            caps.put (SeedFamily.GRID_ASTAR, 8);
+            caps.put (SeedFamily.ZIGZAG_GENERIC, 2);
+            caps.put (SeedFamily.SINUSOIDAL, 1);
+            caps.put (SeedFamily.RANDOM, 1);
         }
         else
         {
@@ -740,13 +792,17 @@ public class OptiPath extends CompetitorProject
         if (lastRestartCheckMs != 0L && (now - lastRestartCheckMs) < RESTART_CHECK_EVERY_MS)
             return;
 
-        // Filet de securite : si apres 30s le score est encore tres mauvais,
+        // Filet de securite : si le score est encore tres mauvais,
         // forcer un restart depuis le seed A* sous stagnation + difficulte de faisabilite.
         long elapsed = now - startTime;
-        boolean stagnating = (now - lastGlobalImproveMs) > 7_000L;
+        // Stagnation plus rapide sur labyrinthes denses (haute dim + beaucoup d'obstacles)
+        long stagnationThreshold = (nObs > 80 && d >= 30) ? 4_000L : 7_000L;
+        boolean stagnating = (now - lastGlobalImproveMs) > stagnationThreshold;
         boolean weakFeasible = (bestFeasibleX == null)
                 || (bestFeasibleFitness > weakFeasibleThreshold ());
-        if (aStarSeed != null && elapsed > 20_000L && stagnating && weakFeasible)
+        // Declencher le filet plus tot sur problemes complexes
+        long safetyDelay = (nObs > 80 && d >= 30) ? 12_000L : 20_000L;
+        if (aStarSeed != null && elapsed > safetyDelay && stagnating && weakFeasible)
         {
             globalBestX = aStarSeed.clone ();
             restartCount++;
@@ -873,13 +929,16 @@ public class OptiPath extends CompetitorProject
         AlgorithmParameters pw = new AlgorithmParameters ();
         pw.setMargin (marginWide);
 
+        CovarianceUpdate covSmall = buildCovarianceUpdate ();
+        CovarianceUpdate covWide = buildCovarianceUpdate ();
+
         cmaesSmall = CMAESBuilder.bipop (problem)
                 .bounds (lbSmall, ubSmall).parameters (ps).initMean (initMean)
-                .covariance (new ActiveCovariance (true))
+            .covariance (covSmall)
                 .sampling (new MirrorSampling ()).build ();
         cmaesWide = CMAESBuilder.bipop (problem)
                 .bounds (lbWide, ubWide).parameters (pw).initMean (initMean)
-                .covariance (new ActiveCovariance (true))
+            .covariance (covWide)
                 .sampling (new MirrorSampling ()).build ();
 
         cmaesSmall.init ();
@@ -909,7 +968,7 @@ public class OptiPath extends CompetitorProject
             ps.setMargin (marginSmall);
             cmaesSmall = CMAESBuilder.bipop (problem)
                     .bounds (lbSmall, ubSmall).parameters (ps).initMean (initMean)
-                    .covariance (new ActiveCovariance (true))
+                    .covariance (buildCovarianceUpdate ())
                     .sampling (new MirrorSampling ()).build ();
             cmaesSmall.init ();
             initialSigmaSmall = cmaesSmall.getState ().sigma;
@@ -920,7 +979,7 @@ public class OptiPath extends CompetitorProject
             pw.setMargin (marginWide);
             cmaesWide = CMAESBuilder.bipop (problem)
                     .bounds (lbWide, ubWide).parameters (pw).initMean (initMean)
-                    .covariance (new ActiveCovariance (true))
+                    .covariance (buildCovarianceUpdate ())
                     .sampling (new MirrorSampling ()).build ();
             cmaesWide.init ();
             initialSigmaWide = cmaesWide.getState ().sigma;
@@ -941,6 +1000,13 @@ public class OptiPath extends CompetitorProject
         lastBestWide = cmaesWide != null ? cmaesWide.getBestFitness () : Double.POSITIVE_INFINITY;
         lastEvalSmall = sState != null ? sState.evaluations : 0;
         lastEvalWide = wState != null ? wState.evaluations : 0;
+    }
+
+    private CovarianceUpdate buildCovarianceUpdate ()
+    {
+        if (d >= 30)
+            return new SeparableWarmupCovariance (new ActiveCovariance (true));
+        return new ActiveCovariance (true);
     }
 
     /**
@@ -1041,7 +1107,12 @@ public class OptiPath extends CompetitorProject
     private double [] noisyClone (double [] base, double sigmaRatio)
     {
         double [] p = base.clone ();
-        double noise = domainDiag * sigmaRatio;
+        double ratio = sigmaRatio;
+        if (mapDiagnostics != null
+                && mapDiagnostics.wallAlignmentConfidence < 0.30
+                && mapDiagnostics.straightBlockageRatio > 0.30)
+            ratio *= 1.8;
+        double noise = domainDiag * ratio;
         for (int i = 0; i < d; i++)
             p[i] += rng.nextGaussian () * noise;
         clamp (p);
@@ -1070,8 +1141,8 @@ public class OptiPath extends CompetitorProject
         System.arraycopy (this.obsR, 0, or_, 0, nObs);
 
         // Detecter murs verticaux ET horizontaux, garder la meilleure orientation
-        ArrayList<double []> vWalls = detectWalls (ox, oy, or_, nObs, true);
-        ArrayList<double []> hWalls = detectWalls (oy, ox, or_, nObs, false);
+        ArrayList<double []> vWalls = detectWalls (ox, oy, or_, nObs, true, sy, ey);
+        ArrayList<double []> hWalls = detectWalls (oy, ox, or_, nObs, false, sx, ex);
 
         // Choisir l'orientation : comparer le total d'obstacles couverts par les murs detectes
         // (pas juste le nombre de murs, car des faux positifs peuvent apparaitre
@@ -1131,6 +1202,20 @@ public class OptiPath extends CompetitorProject
             else
             { waypoints[w + 1][0] = wall[1]; waypoints[w + 1][1] = wall[0]; }
         }
+
+        boolean enableGapTargeting = mapDiagnostics != null
+                && (mapDiagnostics.shouldEnableSpecializedZigzag ()
+                    || mapDiagnostics.alternatingCorridorConfidence >= 0.25)
+                && (mapDiagnostics.pathStretch <= 2.20 || nObs > 100);
+        if (enableGapTargeting)
+            addGapTargetedSeeds (seeds, fits, walls, vertical, sx, sy, ex, ey);
+
+        boolean enableAlternatingPolyline = mapDiagnostics != null
+                && (mapDiagnostics.shouldEnableSpecializedZigzag ()
+                    || (mapDiagnostics.alternatingCorridorConfidence >= 0.18 && nObs > 50))
+                && mapDiagnostics.pathStretch <= 2.20;
+        if (enableAlternatingPolyline)
+            addAlternatingCorridorPolylineSeeds (seeds, fits, walls, vertical, sx, sy, ex, ey);
 
         // Calculer les distances entre waypoints
         double totalDist = 0.0;
@@ -2316,6 +2401,81 @@ public class OptiPath extends CompetitorProject
         }
     }
 
+    private void addSparseObstacleVoronoiSeeds (ArrayList<double []> seeds,
+                                                ArrayList<Double> fits,
+                                                double sx, double sy,
+                                                double ex, double ey)
+    {
+        if (nObs < 2) return;
+
+        ArrayList<double []> pairs = new ArrayList<> (); // [i, j, gap]
+        for (int i = 0; i < nObs; i++)
+        {
+            for (int j = i + 1; j < nObs; j++)
+            {
+                double dx = obsX[j] - obsX[i];
+                double dy = obsY[j] - obsY[i];
+                double dist = Math.hypot (dx, dy);
+                if (dist < 1e-9) continue;
+                double gap = dist - (obsR[i] + obsR[j]);
+                if (gap <= 0.2 || gap > 8.0) continue;
+                pairs.add (new double [] {i, j, gap});
+            }
+        }
+        if (pairs.isEmpty ()) return;
+        pairs.sort ((a, b) -> Double.compare (a[2], b[2]));
+
+        int limit = Math.min (16, pairs.size ());
+        for (int id = 0; id < limit; id++)
+        {
+            int i = (int) pairs.get (id)[0];
+            int j = (int) pairs.get (id)[1];
+            double gap = pairs.get (id)[2];
+
+            double mx = 0.5 * (obsX[i] + obsX[j]);
+            double my = 0.5 * (obsY[i] + obsY[j]);
+            double ux = obsX[j] - obsX[i];
+            double uy = obsY[j] - obsY[i];
+            double len = Math.hypot (ux, uy);
+            if (len < 1e-9) continue;
+            ux /= len;
+            uy /= len;
+            double nx = -uy;
+            double ny = ux;
+
+            double detour = Math.max (1.0, 0.8 * gap + 1.0);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                double wx = mx + side * nx * detour;
+                double wy = my + side * ny * detour;
+
+                wx = Math.max (problem.getMinX () + 0.3, Math.min (problem.getMaxX () - 0.3, wx));
+                wy = Math.max (problem.getMinY () + 0.3, Math.min (problem.getMaxY () - 0.3, wy));
+
+                double [] p = new double [d];
+                for (int cp = 0; cp < nCP; cp++)
+                {
+                    double t = (double) (cp + 1) / (nCP + 1);
+                    if (t < 0.5)
+                    {
+                        double a = t / 0.5;
+                        p[2 * cp] = (1.0 - a) * sx + a * wx;
+                        p[2 * cp + 1] = (1.0 - a) * sy + a * wy;
+                    }
+                    else
+                    {
+                        double a = (t - 0.5) / 0.5;
+                        p[2 * cp] = (1.0 - a) * wx + a * ex;
+                        p[2 * cp + 1] = (1.0 - a) * wy + a * ey;
+                    }
+                }
+
+                repelControlPointsFromObstacles (p, 2);
+                addSeed (seeds, fits, p);
+            }
+        }
+    }
+
     /**
      * Compte le nombre total d'obstacles couverts par un ensemble de murs detectes.
      * Utilise pour comparer murs verticaux vs horizontaux.
@@ -2347,7 +2507,8 @@ public class OptiPath extends CompetitorProject
      * @param isVertical true si on cherche des murs verticaux
      */
     private ArrayList<double []> detectWalls (double [] primary, double [] secondary,
-                                               double [] radii, int n, boolean isVertical)
+                                               double [] radii, int n, boolean isVertical,
+                                               double startSecondary, double endSecondary)
     {
         ArrayList<double []> walls = new ArrayList<> ();
 
@@ -2394,35 +2555,242 @@ public class OptiPath extends CompetitorProject
                     merged.add (new double [] {iv[0], iv[1]});
             }
 
-            // Trouver le plus grand gap
-            double bestGapCenter = (domMin + domMax) / 2.0;
-            double bestGapSize = 0.0;
+            ArrayList<double []> gapCandidates = new ArrayList<> ();
 
-            // Gap avant le premier intervalle
             if (!merged.isEmpty () && merged.get (0)[0] > domMin)
             {
                 double sz = merged.get (0)[0] - domMin;
-                if (sz > bestGapSize) { bestGapSize = sz; bestGapCenter = domMin + sz / 2.0; }
+                gapCandidates.add (new double [] {domMin + sz / 2.0, sz});
             }
-            // Gaps entre intervalles
             for (int k = 0; k < merged.size () - 1; k++)
             {
                 double gStart = merged.get (k)[1];
                 double gEnd = merged.get (k + 1)[0];
                 double sz = gEnd - gStart;
-                if (sz > bestGapSize) { bestGapSize = sz; bestGapCenter = (gStart + gEnd) / 2.0; }
+                if (sz > 0.0)
+                    gapCandidates.add (new double [] {(gStart + gEnd) / 2.0, sz});
             }
-            // Gap apres le dernier intervalle
             if (!merged.isEmpty () && merged.get (merged.size () - 1)[1] < domMax)
             {
                 double sz = domMax - merged.get (merged.size () - 1)[1];
-                if (sz > bestGapSize) { bestGapSize = sz; bestGapCenter = merged.get (merged.size () - 1)[1] + sz / 2.0; }
+                gapCandidates.add (new double [] {merged.get (merged.size () - 1)[1] + sz / 2.0, sz});
+            }
+
+            if (gapCandidates.isEmpty ())
+                continue;
+
+            double refCenter = 0.5 * (startSecondary + endSecondary);
+            double domainSpan = Math.max (1e-9, domMax - domMin);
+            double minGapThreshold = Math.max (0.5, 0.12 * domainSpan);
+            double bestGapCenter = gapCandidates.get (0)[0];
+            double bestGapSize = gapCandidates.get (0)[1];
+            double bestScore = Double.NEGATIVE_INFINITY;
+
+            for (double [] gap : gapCandidates)
+            {
+                double center = gap[0];
+                double size = gap[1];
+                if (size < minGapThreshold) continue;
+
+                double edgeDistance = Math.min (center - domMin, domMax - center);
+                double score = size
+                        - 0.20 * Math.abs (center - refCenter)
+                        + 0.10 * edgeDistance;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestGapCenter = center;
+                    bestGapSize = size;
+                }
+            }
+
+            if (!Double.isFinite (bestScore))
+            {
+                gapCandidates.sort ((a, b) -> Double.compare (b[1], a[1]));
+                bestGapCenter = gapCandidates.get (0)[0];
+                bestGapSize = gapCandidates.get (0)[1];
             }
 
             walls.add (new double [] {wallPos, bestGapCenter, bestGapSize});
         }
 
         return walls;
+    }
+
+    private void addGapTargetedSeeds (ArrayList<double []> seeds, ArrayList<Double> fits,
+                                      ArrayList<double []> walls, boolean vertical,
+                                      double sx, double sy, double ex, double ey)
+    {
+        if (walls == null || walls.isEmpty () || nCP < 2) return;
+
+        ArrayList<double []> activeWalls = new ArrayList<> (walls);
+        if (activeWalls.size () > Math.max (2, nCP / 2))
+        {
+            activeWalls.sort ((a, b) -> Double.compare (a[2], b[2]));
+            activeWalls = new ArrayList<> (activeWalls.subList (0, Math.max (2, nCP / 2)));
+            if (vertical)
+            {
+                if (ex >= sx) activeWalls.sort ((a, b) -> Double.compare (a[0], b[0]));
+                else activeWalls.sort ((a, b) -> Double.compare (b[0], a[0]));
+            }
+            else
+            {
+                if (ey >= sy) activeWalls.sort ((a, b) -> Double.compare (a[0], b[0]));
+                else activeWalls.sort ((a, b) -> Double.compare (b[0], a[0]));
+            }
+        }
+
+        int nWalls = activeWalls.size ();
+        double [] tWalls = new double [nWalls];
+        for (int w = 0; w < nWalls; w++)
+        {
+            double t;
+            if (vertical)
+            {
+                double denom = Math.max (1e-9, ex - sx);
+                t = (activeWalls.get (w)[0] - sx) / denom;
+            }
+            else
+            {
+                double denom = Math.max (1e-9, ey - sy);
+                t = (activeWalls.get (w)[0] - sy) / denom;
+            }
+            tWalls[w] = Math.max (0.0, Math.min (1.0, t));
+        }
+
+        double [] overshoots = {1.0, 1.3, 1.6};
+        for (double overshoot : overshoots)
+        {
+            for (int variant = 0; variant < 3; variant++)
+            {
+                double [] p = new double [d];
+
+                for (int i = 0; i < nCP; i++)
+                {
+                    double t = (double) (i + 1) / (nCP + 1);
+                    double targetX = sx + t * (ex - sx);
+                    double targetY = sy + t * (ey - sy);
+
+                    int right = 0;
+                    while (right < nWalls && tWalls[right] < t) right++;
+                    int left = Math.max (0, right - 1);
+                    right = Math.min (nWalls - 1, right);
+
+                    double tL = tWalls[left];
+                    double tR = tWalls[right];
+                    double alpha = (Math.abs (tR - tL) > 1e-9)
+                            ? (t - tL) / (tR - tL)
+                            : 0.0;
+                    alpha = Math.max (0.0, Math.min (1.0, alpha));
+
+                    double gapL = activeWalls.get (left)[1];
+                    double gapR = activeWalls.get (right)[1];
+                    double wallL = activeWalls.get (left)[0];
+                    double wallR = activeWalls.get (right)[0];
+
+                    double baseGap = (1.0 - alpha) * gapL + alpha * gapR;
+                    double baseWall = (1.0 - alpha) * wallL + alpha * wallR;
+
+                    if (vertical)
+                    {
+                        double mid = sy + t * (ey - sy);
+                        targetX = baseWall;
+                        targetY = mid + overshoot * (baseGap - mid);
+                    }
+                    else
+                    {
+                        double mid = sx + t * (ex - sx);
+                        targetX = mid + overshoot * (baseGap - mid);
+                        targetY = baseWall;
+                    }
+
+                    p[2 * i] = targetX;
+                    p[2 * i + 1] = targetY;
+                }
+
+                int cpsPerWall = (nCP >= 3 * nWalls) ? 3 : 2;
+                for (int w = 0; w < nWalls; w++)
+                {
+                    int center = (int) Math.round (tWalls[w] * (nCP + 1)) - 1;
+                    center = Math.max (0, Math.min (nCP - 1, center));
+                    double wallPos = activeWalls.get (w)[0];
+                    double gapCenter = activeWalls.get (w)[1];
+                    for (int k = 0; k < cpsPerWall; k++)
+                    {
+                        int cp = center + k - (cpsPerWall / 2);
+                        if (cp < 0 || cp >= nCP) continue;
+                        if (vertical)
+                        {
+                            p[2 * cp] = wallPos;
+                            p[2 * cp + 1] = gapCenter;
+                        }
+                        else
+                        {
+                            p[2 * cp] = gapCenter;
+                            p[2 * cp + 1] = wallPos;
+                        }
+                    }
+                }
+
+                if (variant > 0)
+                {
+                    double noise = 0.15 * variant;
+                    for (int i = 0; i < d; i++)
+                        p[i] += rng.nextGaussian () * noise;
+                }
+
+                repelControlPointsFromObstacles (p, 1);
+                addSeed (seeds, fits, p);
+            }
+        }
+    }
+
+    private void addAlternatingCorridorPolylineSeeds (ArrayList<double []> seeds,
+                                                      ArrayList<Double> fits,
+                                                      ArrayList<double []> walls,
+                                                      boolean vertical,
+                                                      double sx, double sy,
+                                                      double ex, double ey)
+    {
+        if (walls == null || walls.size () < 2 || nCP < 4) return;
+
+        ArrayList<double []> orderedWalls = new ArrayList<> (walls);
+        if (vertical)
+        {
+            if (ex >= sx) orderedWalls.sort ((a, b) -> Double.compare (a[0], b[0]));
+            else orderedWalls.sort ((a, b) -> Double.compare (b[0], a[0]));
+        }
+        else
+        {
+            if (ey >= sy) orderedWalls.sort ((a, b) -> Double.compare (a[0], b[0]));
+            else orderedWalls.sort ((a, b) -> Double.compare (b[0], a[0]));
+        }
+
+        ArrayList<double []> polyline = new ArrayList<> ();
+        polyline.add (new double [] {sx, sy});
+        for (double [] wall : orderedWalls)
+        {
+            if (vertical)
+                polyline.add (new double [] {wall[0], wall[1]});
+            else
+                polyline.add (new double [] {wall[1], wall[0]});
+        }
+        polyline.add (new double [] {ex, ey});
+
+        double [] p = new double [d];
+        if (!fillAdaptiveControlPointsFromPolyline (polyline, p))
+            return;
+
+        for (int k = 0; k < 4; k++)
+        {
+            double [] q = p.clone ();
+            double noise = 0.20 + 0.10 * k;
+            for (int i = 0; i < d; i++)
+                q[i] += rng.nextGaussian () * noise;
+            repelControlPointsFromObstacles (q, 2);
+            addSeed (seeds, fits, q);
+        }
     }
 
     /**
@@ -2592,7 +2960,16 @@ public class OptiPath extends CompetitorProject
         int adaptiveGrid = (minGap > 0.5)
                 ? (int) (domainSize / minGap * 4)
                 : 24 + nObs;
-        int grid = Math.max (40, Math.min (160, adaptiveGrid));
+        int grid = Math.max (40, Math.min (240, adaptiveGrid));
+        if (mapDiagnostics != null
+            && domainSize >= 45.0
+            && mapDiagnostics.estimatedCorridorWidth < 1.1
+            && mapDiagnostics.pathStretch > 1.8)
+            grid = Math.max (grid, 220);
+        if (mapDiagnostics != null && mapDiagnostics.pathStretch > 2.5)
+            grid = Math.max (grid, 240);
+        if (nObs > 150)
+            grid = Math.max (grid, 260);
         double minX = problem.getMinX (), maxX = problem.getMaxX ();
         double minY = problem.getMinY (), maxY = problem.getMaxY ();
         double stepX = (maxX - minX) / Math.max (1, grid - 1);
@@ -2711,22 +3088,36 @@ public class OptiPath extends CompetitorProject
         double total = cumul[path.size () - 1];
         if (total < 1e-9) return;
 
+        double rdpTolerance = 0.8;
+        if (mapDiagnostics != null)
+            rdpTolerance = Math.max (0.20, Math.min (1.4, mapDiagnostics.estimatedCorridorWidth * 0.6));
+        ArrayList<double []> simplifiedPath = simplifyPathRDP (path, rdpTolerance);
+
         double [] p = new double [d];
-        for (int i = 0; i < nCP; i++)
+        if (!fillAdaptiveControlPointsFromPolyline (simplifiedPath, p))
         {
-            double target = ((double) (i + 1) / (nCP + 1)) * total;
-            int seg = 1;
-            while (seg < cumul.length && cumul[seg] < target) seg++;
-            seg = Math.max (1, Math.min (seg, cumul.length - 1));
-            double den = Math.max (1e-9, cumul[seg] - cumul[seg - 1]);
-            double a = (target - cumul[seg - 1]) / den;
-            double x = (1.0 - a) * path.get(seg - 1)[0] + a * path.get(seg)[0];
-            double y = (1.0 - a) * path.get(seg - 1)[1] + a * path.get(seg)[1];
-            p[2 * i] = x;
-            p[2 * i + 1] = y;
+            for (int i = 0; i < nCP; i++)
+            {
+                double target = ((double) (i + 1) / (nCP + 1)) * total;
+                int seg = 1;
+                while (seg < cumul.length && cumul[seg] < target) seg++;
+                seg = Math.max (1, Math.min (seg, cumul.length - 1));
+                double den = Math.max (1e-9, cumul[seg] - cumul[seg - 1]);
+                double a = (target - cumul[seg - 1]) / den;
+                double x = (1.0 - a) * path.get(seg - 1)[0] + a * path.get(seg)[0];
+                double y = (1.0 - a) * path.get(seg - 1)[1] + a * path.get(seg)[1];
+                p[2 * i] = x;
+                p[2 * i + 1] = y;
+            }
         }
-        int repairIters = (mapDiagnostics != null && mapDiagnostics.pathStretch >= 1.6)
-                ? 280 : 120;
+
+        int repairIters = 120;
+        if (mapDiagnostics != null && mapDiagnostics.pathStretch > 2.5)
+            repairIters = 700;
+        else if (mapDiagnostics != null && mapDiagnostics.pathStretch >= 1.6)
+            repairIters = 320;
+        if (nObs > 150)
+            repairIters = Math.max (repairIters, 900);
         p = repairSeedForFeasibility (p, repairIters, 1.0);
         repelControlPointsFromObstacles (p, 3);
         this.aStarSeed = p.clone ();
@@ -2748,24 +3139,28 @@ public class OptiPath extends CompetitorProject
         if (path.size () >= 4)
         {
             // Simplifier le path A* en waypoints (start, virages significatifs, end)
-            ArrayList<double []> keyPoints = new ArrayList<> ();
-            keyPoints.add (path.get (0));
-            for (int i = 1; i < path.size () - 1; i++)
+            ArrayList<double []> keyPoints = simplifyPathRDP (path, rdpTolerance);
+            if (keyPoints.size () < 3)
             {
-                double ax = path.get(i)[0] - path.get(i-1)[0];
-                double ay = path.get(i)[1] - path.get(i-1)[1];
-                double bx = path.get(i+1)[0] - path.get(i)[0];
-                double by = path.get(i+1)[1] - path.get(i)[1];
-                double magA = Math.hypot (ax, ay);
-                double magB = Math.hypot (bx, by);
-                if (magA > 1e-9 && magB > 1e-9)
+                keyPoints = new ArrayList<> ();
+                keyPoints.add (path.get (0));
+                for (int i = 1; i < path.size () - 1; i++)
                 {
-                    double cos = (ax * bx + ay * by) / (magA * magB);
-                    if (cos < 0.85) // virage significatif (> ~30 deg)
-                        keyPoints.add (path.get (i));
+                    double ax = path.get(i)[0] - path.get(i-1)[0];
+                    double ay = path.get(i)[1] - path.get(i-1)[1];
+                    double bx = path.get(i+1)[0] - path.get(i)[0];
+                    double by = path.get(i+1)[1] - path.get(i)[1];
+                    double magA = Math.hypot (ax, ay);
+                    double magB = Math.hypot (bx, by);
+                    if (magA > 1e-9 && magB > 1e-9)
+                    {
+                        double cos = (ax * bx + ay * by) / (magA * magB);
+                        if (cos < 0.85) // virage significatif (> ~30 deg)
+                            keyPoints.add (path.get (i));
+                    }
                 }
+                keyPoints.add (path.get (path.size () - 1));
             }
-            keyPoints.add (path.get (path.size () - 1));
 
             if (keyPoints.size () >= 3)
             {
@@ -2895,6 +3290,184 @@ public class OptiPath extends CompetitorProject
         return cur;
     }
 
+    private ArrayList<double []> simplifyPathRDP (ArrayList<double []> path, double tolerance)
+    {
+        ArrayList<double []> result = new ArrayList<> ();
+        if (path == null || path.size () < 3)
+        {
+            if (path != null) result.addAll (path);
+            return result;
+        }
+
+        double tol = Math.max (1e-6, tolerance);
+        boolean [] keep = new boolean [path.size ()];
+        keep[0] = true;
+        keep[path.size () - 1] = true;
+        rdpMark (path, 0, path.size () - 1, tol, keep);
+
+        for (int i = 0; i < path.size (); i++)
+            if (keep[i]) result.add (path.get (i));
+
+        return result;
+    }
+
+    private void rdpMark (ArrayList<double []> path, int a, int b,
+                          double tolerance, boolean [] keep)
+    {
+        if (b <= a + 1) return;
+
+        double [] p0 = path.get (a);
+        double [] p1 = path.get (b);
+        double vx = p1[0] - p0[0];
+        double vy = p1[1] - p0[1];
+        double den = Math.hypot (vx, vy);
+
+        double maxDist = -1.0;
+        int idx = -1;
+        for (int i = a + 1; i < b; i++)
+        {
+            double [] p = path.get (i);
+            double dist;
+            if (den < 1e-12)
+                dist = Math.hypot (p[0] - p0[0], p[1] - p0[1]);
+            else
+                dist = Math.abs ((p[0] - p0[0]) * vy - (p[1] - p0[1]) * vx) / den;
+
+            if (dist > maxDist)
+            {
+                maxDist = dist;
+                idx = i;
+            }
+        }
+
+        if (idx >= 0 && maxDist > tolerance)
+        {
+            keep[idx] = true;
+            rdpMark (path, a, idx, tolerance, keep);
+            rdpMark (path, idx, b, tolerance, keep);
+        }
+    }
+
+    private boolean fillAdaptiveControlPointsFromPolyline (ArrayList<double []> polyline, double [] out)
+    {
+        if (polyline == null || polyline.size () < 2 || out == null || out.length != d)
+            return false;
+
+        int nPts = polyline.size ();
+        int nSeg = nPts - 1;
+
+        double [] segLen = new double [nSeg];
+        double totalLen = 0.0;
+        for (int s = 0; s < nSeg; s++)
+        {
+            segLen[s] = Math.hypot (polyline.get (s + 1)[0] - polyline.get (s)[0],
+                                    polyline.get (s + 1)[1] - polyline.get (s)[1]);
+            totalLen += segLen[s];
+        }
+        if (totalLen < 1e-9) return false;
+
+        int [] cpPerSeg = new int [nSeg];
+        for (int s = 0; s < nSeg; s++) cpPerSeg[s] = 1;
+        int allocated = nSeg;
+
+        for (int i = 1; i < nPts - 1; i++)
+        {
+            double ax = polyline.get (i)[0] - polyline.get (i - 1)[0];
+            double ay = polyline.get (i)[1] - polyline.get (i - 1)[1];
+            double bx = polyline.get (i + 1)[0] - polyline.get (i)[0];
+            double by = polyline.get (i + 1)[1] - polyline.get (i)[1];
+            double magA = Math.hypot (ax, ay);
+            double magB = Math.hypot (bx, by);
+            if (magA < 1e-9 || magB < 1e-9) continue;
+            double cos = (ax * bx + ay * by) / (magA * magB);
+            cos = Math.max (-1.0, Math.min (1.0, cos));
+            double severity = 1.0 - (cos + 1.0) * 0.5;
+
+            int bonus = 0;
+            if (severity > 0.55) bonus = 3;
+            else if (severity > 0.35) bonus = 2;
+            else if (severity > 0.20) bonus = 1;
+
+            if (bonus > 0)
+            {
+                cpPerSeg[i - 1] += bonus;
+                cpPerSeg[i] += bonus;
+                allocated += 2 * bonus;
+            }
+        }
+
+        if (allocated > nCP)
+        {
+            double scale = (double) nCP / allocated;
+            allocated = 0;
+            for (int s = 0; s < nSeg; s++)
+            {
+                cpPerSeg[s] = Math.max (1, (int) Math.floor (cpPerSeg[s] * scale));
+                allocated += cpPerSeg[s];
+            }
+        }
+
+        int remaining = nCP - allocated;
+        if (remaining > 0)
+        {
+            while (remaining > 0)
+            {
+                int bestSeg = 0;
+                double bestScore = Double.NEGATIVE_INFINITY;
+                for (int s = 0; s < nSeg; s++)
+                {
+                    double score = segLen[s] / Math.max (1, cpPerSeg[s]);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestSeg = s;
+                    }
+                }
+                cpPerSeg[bestSeg]++;
+                remaining--;
+            }
+        }
+
+        int cpIdx = 0;
+        for (int s = 0; s < nSeg && cpIdx < nCP; s++)
+        {
+            int count = Math.max (1, cpPerSeg[s]);
+            double [] a = polyline.get (s);
+            double [] b = polyline.get (s + 1);
+            for (int k = 0; k < count && cpIdx < nCP; k++)
+            {
+                double alpha = (double) (k + 1) / (count + 1);
+                out[2 * cpIdx] = (1.0 - alpha) * a[0] + alpha * b[0];
+                out[2 * cpIdx + 1] = (1.0 - alpha) * a[1] + alpha * b[1];
+                cpIdx++;
+            }
+        }
+
+        if (cpIdx < nCP)
+        {
+            double [] cumul = new double [nPts];
+            cumul[0] = 0.0;
+            for (int i = 1; i < nPts; i++)
+                cumul[i] = cumul[i - 1] + Math.hypot (polyline.get (i)[0] - polyline.get (i - 1)[0],
+                                                      polyline.get (i)[1] - polyline.get (i - 1)[1]);
+            double total = cumul[nPts - 1];
+            while (cpIdx < nCP)
+            {
+                double target = ((double) (cpIdx + 1) / (nCP + 1)) * total;
+                int seg = 1;
+                while (seg < cumul.length && cumul[seg] < target) seg++;
+                seg = Math.max (1, Math.min (seg, cumul.length - 1));
+                double den = Math.max (1e-9, cumul[seg] - cumul[seg - 1]);
+                double a = (target - cumul[seg - 1]) / den;
+                out[2 * cpIdx] = (1.0 - a) * polyline.get (seg - 1)[0] + a * polyline.get (seg)[0];
+                out[2 * cpIdx + 1] = (1.0 - a) * polyline.get (seg - 1)[1] + a * polyline.get (seg)[1];
+                cpIdx++;
+            }
+        }
+
+        return true;
+    }
+
     private static double heuristic (int x, int y, int tx, int ty)
     {
         return Math.hypot (x - tx, y - ty);
@@ -2944,7 +3517,8 @@ public class OptiPath extends CompetitorProject
         if (now - startTime < rescueStart) return;
 
         boolean noFeasible = (bestFeasibleX == null);
-        boolean stalled = (now - lastGlobalImproveMs) > 5_000L;
+        long stallThreshold = (nObs > 80 && d >= 30) ? 3_000L : 5_000L;
+        boolean stalled = (now - lastGlobalImproveMs) > stallThreshold;
         // Aussi considerer comme stalled si la meilleure solution faisable a un score
         // bien pire que la longueur estimee du chemin (penalites probables)
         boolean poorQuality = (bestFeasibleFitness > weakFeasibleThreshold ());
@@ -2964,8 +3538,9 @@ public class OptiPath extends CompetitorProject
 
         if (noFeasible)
         {
-            int restarts = (elapsed > 25_000L) ? 6 : 3;
-            int hillIters = (elapsed > 25_000L) ? 260 : 140;
+            boolean denseMaze = nObs > 80 && d >= 30;
+            int restarts = (elapsed > 25_000L) ? 6 : (denseMaze ? 5 : 3);
+            int hillIters = (elapsed > 25_000L) ? 260 : (denseMaze ? 200 : 140);
             for (int r = 0; r < restarts && bestFeasibleX == null; r++)
             {
                 double [] seed = sampleFeasibilityStart (base, r);
@@ -3117,12 +3692,15 @@ public class OptiPath extends CompetitorProject
         long now = System.currentTimeMillis ();
         long elapsed = now - startTime;
         boolean specialized = mapDiagnostics != null && mapDiagnostics.shouldEnableSpecializedZigzag ();
-        double startRatio = specialized ? 0.28 : 0.55;
+        boolean denseMaze = nObs > 80 && d >= 30;
+        double startRatio = specialized ? 0.28 : (denseMaze ? 0.35 : 0.55);
         if (elapsed < (long) (startRatio * TOTAL_TIME_MS)) return;
 
         long cooldown = specialized
                 ? ((elapsed > (long) (0.78 * TOTAL_TIME_MS)) ? 18L : 35L)
-                : ((elapsed > (long) (0.78 * TOTAL_TIME_MS)) ? 40L : 70L);
+                : denseMaze
+                    ? ((elapsed > (long) (0.78 * TOTAL_TIME_MS)) ? 25L : 50L)
+                    : ((elapsed > (long) (0.78 * TOTAL_TIME_MS)) ? 40L : 70L);
         if (lastIncumbentRefineMs != 0L && now - lastIncumbentRefineMs < cooldown) return;
 
         double [] anchor = null;
